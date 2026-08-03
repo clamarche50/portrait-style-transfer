@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-
 from portrait_transfer import (
     MediaPipePortraitAnalyzer,
     create_default_runtime,

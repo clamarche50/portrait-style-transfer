@@ -93,11 +93,15 @@ class Client:
             with self.opener.open(request, timeout=30) as response:
                 payload = response.read()
                 status = response.status
-                response_headers = dict(response.headers.items())
+                response_headers = {
+                    key.lower(): value for key, value in response.headers.items()
+                }
         except urllib.error.HTTPError as exc:
             payload = exc.read()
             status = exc.code
-            response_headers = dict(exc.headers.items())
+            response_headers = {
+                key.lower(): value for key, value in exc.headers.items()
+            }
         if status not in expected:
             raise RuntimeError(
                 f"{method} {url} returned HTTP {status}: {payload[:500]!r}"
@@ -202,7 +206,7 @@ def main() -> int:
         download = client.json("POST", f"/jobs/{job['id']}/download-url", {})
         downloaded, headers = client.request("GET", str(download["url"]))
         if downloaded != output or "attachment" not in headers.get(
-            "Content-Disposition", ""
+            "content-disposition", ""
         ):
             raise RuntimeError(
                 "download endpoint did not return the generated file as an attachment"

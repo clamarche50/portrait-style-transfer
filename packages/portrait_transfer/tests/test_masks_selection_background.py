@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from portrait_transfer.background import (
     apply_background_mode,
     extract_reference_background,

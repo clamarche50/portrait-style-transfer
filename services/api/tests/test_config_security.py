@@ -19,3 +19,19 @@ def test_production_session_secret_requires_at_least_32_characters() -> None:
         s3_server_side_encryption="AES256",
     )
     assert settings.cookie_secure
+
+
+def test_environment_accepts_documented_comma_separated_cors_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        "https://studio.example, http://localhost:3000",
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.cors_origins == [
+        "https://studio.example",
+        "http://localhost:3000",
+    ]

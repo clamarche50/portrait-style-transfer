@@ -65,13 +65,13 @@ class JobRepository:
             Job.deleted_at.is_(None),
         )
         if for_update:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update(of=Job)
         return self.session.scalar(statement)
 
     def get_for_worker(self, job_id: uuid.UUID, *, for_update: bool = False) -> Job | None:
         statement = select(Job).where(Job.id == job_id, Job.deleted_at.is_(None))
         if for_update:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update(of=Job)
         return self.session.scalar(statement)
 
     def active_count(self, session_id: uuid.UUID) -> int:

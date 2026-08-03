@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "**/.pytest_cache/**",
+    "**/.test-tmp*/**",
   ]),
 ]);
 

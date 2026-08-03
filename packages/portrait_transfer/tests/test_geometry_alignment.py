@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from portrait_transfer.alignment.anchors import alignment_anchors
 from portrait_transfer.alignment.beier_neely import (
     beier_neely_map,

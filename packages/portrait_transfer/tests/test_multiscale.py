@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from portrait_transfer.config import AlgorithmProfile, LegacyColorMode
 from portrait_transfer.geometry.sampling import identity_map
 from portrait_transfer.multiscale.color import should_transfer_band, transfer_band

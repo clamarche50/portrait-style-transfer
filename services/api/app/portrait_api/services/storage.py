@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from threading import Lock
 from typing import Protocol
@@ -9,6 +10,16 @@ from botocore.client import BaseClient
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from portrait_api.config import Settings
+
+
+def _contains_public_principal(value: object) -> bool:
+    if value == "*":
+        return True
+    if isinstance(value, dict):
+        return any(_contains_public_principal(item) for item in value.values())
+    if isinstance(value, list | tuple):
+        return any(_contains_public_principal(item) for item in value)
+    return False
 
 
 class ObjectStorage(Protocol):
@@ -29,6 +40,7 @@ class Boto3ObjectStorage:
     def __init__(self, settings: Settings) -> None:
         addressing_style = "path" if settings.s3_force_path_style else "virtual"
         self.bucket = settings.s3_bucket
+        self._custom_endpoint = settings.s3_endpoint_url is not None
         self._put_encryption: dict[str, str] = {}
         if settings.s3_server_side_encryption != "none":
             self._put_encryption["ServerSideEncryption"] = settings.s3_server_side_encryption
@@ -51,15 +63,55 @@ class Boto3ObjectStorage:
             if code not in {"404", "NoSuchBucket", "NotFound"}:
                 raise
             self.client.create_bucket(Bucket=self.bucket)
-        self.client.put_public_access_block(
-            Bucket=self.bucket,
-            PublicAccessBlockConfiguration={
-                "BlockPublicAcls": True,
-                "IgnorePublicAcls": True,
-                "BlockPublicPolicy": True,
-                "RestrictPublicBuckets": True,
-            },
-        )
+        try:
+            self.client.put_public_access_block(
+                Bucket=self.bucket,
+                PublicAccessBlockConfiguration={
+                    "BlockPublicAcls": True,
+                    "IgnorePublicAcls": True,
+                    "BlockPublicPolicy": True,
+                    "RestrictPublicBuckets": True,
+                },
+            )
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if not self._custom_endpoint or code not in {
+                "MalformedXML",
+                "NotImplemented",
+                "UnsupportedOperation",
+            }:
+                raise
+            self._verify_private_compatible_bucket()
+
+    def _verify_private_compatible_bucket(self) -> None:
+        acl = self.client.get_bucket_acl(Bucket=self.bucket)
+        public_acl_uris = {
+            "http://acs.amazonaws.com/groups/global/AllUsers",
+            "http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
+        }
+        for grant in acl.get("Grants", []):
+            grantee = grant.get("Grantee", {})
+            if isinstance(grantee, dict) and grantee.get("URI") in public_acl_uris:
+                raise RuntimeError("Object-storage bucket ACL is public")
+
+        try:
+            response = self.client.get_bucket_policy(Bucket=self.bucket)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"NoSuchBucketPolicy", "NoSuchPolicy", "404", "NotFound"}:
+                return
+            raise
+        policy = json.loads(str(response.get("Policy", "{}")))
+        statements = policy.get("Statement", []) if isinstance(policy, dict) else []
+        if isinstance(statements, dict):
+            statements = [statements]
+        for statement in statements:
+            if (
+                isinstance(statement, dict)
+                and statement.get("Effect") == "Allow"
+                and _contains_public_principal(statement.get("Principal"))
+            ):
+                raise RuntimeError("Object-storage bucket policy allows public access")
 
     def ping(self) -> bool:
         self.client.head_bucket(Bucket=self.bucket)

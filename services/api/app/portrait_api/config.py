@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _split_csv(value: object) -> object:
@@ -14,7 +14,7 @@ def _split_csv(value: object) -> object:
     return value
 
 
-CsvList = Annotated[list[str], BeforeValidator(_split_csv)]
+CsvList = Annotated[list[str], NoDecode, BeforeValidator(_split_csv)]
 
 
 class Settings(BaseSettings):

@@ -5,7 +5,6 @@ from io import BytesIO
 import numpy as np
 import pytest
 from PIL import Image
-
 from portrait_transfer.color.lab import lab_to_rgb, lab_to_rgb_gamut_safe, rgb_to_lab
 from portrait_transfer.color.legacy_color import legacy_lab_to_rgb, legacy_rgb_to_lab
 from portrait_transfer.config import ImageLimits

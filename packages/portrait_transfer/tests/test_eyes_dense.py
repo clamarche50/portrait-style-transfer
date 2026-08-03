@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from portrait_transfer.alignment import flow_optimization
 from portrait_transfer.alignment.flow_optimization import CpuDenseCorrespondence
 from portrait_transfer.config import DenseSettings

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from portrait_transfer.alignment.correction_constraints import (
     apply_eye_center_operations,
     apply_gain_constraint_operations,

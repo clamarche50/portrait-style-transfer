@@ -14,6 +14,8 @@ dist
 **/*.egg-info
 .hypothesis
 **/.hypothesis
+.test-tmp*
+**/.test-tmp*
 test-results
 playwright-report
 blob-report
