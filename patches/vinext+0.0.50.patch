@@ -1,0 +1,13 @@
+diff --git a/node_modules/vinext/dist/server/static-file-cache.js b/node_modules/vinext/dist/server/static-file-cache.js
+index ba3bec2..270cd46 100644
+--- a/node_modules/vinext/dist/server/static-file-cache.js
++++ b/node_modules/vinext/dist/server/static-file-cache.js
+@@ -204,7 +204,7 @@ async function* walkFilesWithStats(dir, base = dir) {
+ 		const batch = files.slice(i, i + STAT_BATCH_SIZE);
+ 		const stats = await Promise.all(batch.map((f) => fsp.stat(f)));
+ 		for (let j = 0; j < batch.length; j++) yield {
+-			relativePath: path.relative(base, batch[j]),
++			relativePath: path.relative(base, batch[j]).split(path.sep).join("/"),
+ 			fullPath: batch[j],
+ 			stat: {
+ 				size: stats[j].size,

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "id": "mediapipe-face-landmarker",
+      "version": "float16/1",
+      "filename": "face_landmarker.task",
+      "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+      "checksum_source": "verified download from the pinned official URL on 2026-08-03",
+      "required": true,
+      "source": "Google MediaPipe model storage",
+      "terms_url": "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker"
+    },
+    {
+      "id": "mediapipe-selfie-multiclass-segmenter",
+      "version": "float32/1",
+      "filename": "selfie_multiclass_256x256.tflite",
+      "url": "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite",
+      "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0",
+      "checksum_source": "verified download from the pinned official URL on 2026-08-03",
+      "required": true,
+      "source": "Google MediaPipe model storage",
+      "terms_url": "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter"
+    }
+  ]
+}

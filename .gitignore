@@ -1,0 +1,92 @@
+# Dependencies and build output
+node_modules/
+.pnp*
+.yarn/
+.next/
+.vinext/
+dist/
+build-output/
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+test-results/
+playwright-report/
+blob-report/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.test-tmp*/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv-cache*/
+.uv-python*/
+.uv-tools*/
+
+# Local environments and secrets; keep the documented example
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime state
+.wrangler/
+outputs/
+work/
+tmp/
+.celerybeat-schedule
+*.pid
+*.log
+
+# Private/generated image data
+uploads/
+exports/
+jobs/debug/
+tests/fixtures/private/
+tests/fixtures/real/
+*.presigned-url
+*.cookies
+*.cookiejar
+
+# Model binaries (manifest and documentation remain tracked)
+models/*.task
+models/*.tflite
+models/*.onnx
+models/*.bin
+models/*.pt
+models/*.pth
+models/.downloads/
+
+# Original research material: never track or ship
+reference/original-matlab/
+reference/original-paper/
+reference/uploads/
+reference/manifests/*.json
+reference/manifests/*.md
+reference/manifests/*.sha256
+!reference/manifests/.gitkeep
+2014_portrait.pdf
+clamarche50-temp-*.txt
+*.mex*
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tsbuildinfo
+
+# IaC/local service state
+infra/observability/grafana/data/
+postgres-data/
+redis-data/
+minio-data/
+.terraform/
+*.tfstate*

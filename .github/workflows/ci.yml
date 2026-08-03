@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-boundary:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reject reference material in shipping paths
+        run: >-
+          python scripts/audit_reference_source.py
+          --source-dir reference/original-matlab
+          --production-root .
+          --allow-missing
+          --manifest /tmp/source-audit.json
+          --report /tmp/source-audit.md
+      - name: Confirm Docker context exclusions
+        run: |
+          grep -Fx 'reference/original-matlab' .dockerignore
+          grep -Fx 'reference/original-paper' .dockerignore
+          grep -Fx 'clamarche50-temp-*.txt' .dockerignore
+
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm exec tsc -- --noEmit
+      - run: npm test
+      - run: npm run build
+
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.18"
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --project packages/portrait_transfer --frozen --all-groups --extra test
+      - run: uv sync --project services/api --frozen --all-groups
+      - run: uv sync --project services/worker --frozen --all-groups
+      - name: Lint and format
+        run: |
+          uv run --project services/api ruff check packages/portrait_transfer services/api services/worker scripts
+          uv run --project services/api ruff format --check packages/portrait_transfer services/api services/worker scripts
+      - name: Type-check each Python import root independently
+        run: |
+          uv run --project services/api mypy packages/portrait_transfer/src
+          uv run --project services/api mypy services/api/app
+          uv run --project services/worker mypy services/worker/app
+      - name: Unit and legacy primitive tests
+        run: |
+          uv run --project packages/portrait_transfer --extra test --with pytest-cov==7.0.0 pytest packages/portrait_transfer/tests --cov=portrait_transfer --cov-report=term-missing
+          uv run --project packages/portrait_transfer --extra test pytest packages/portrait_transfer/tests -k "legacy or source"
+
+  integration:
+    runs-on: ubuntu-24.04
+    needs: [python]
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_DB: portrait_test
+          POSTGRES_USER: portrait
+          POSTGRES_PASSWORD: portrait-test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U portrait -d portrait_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4.1-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: test
+      ALLOW_HEURISTIC_ANALYZER: "true"
+      REQUIRE_MODELS_FOR_READINESS: "false"
+      DATABASE_URL: postgresql+psycopg://portrait:portrait-test@localhost:5432/portrait_test
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minio
+      S3_SECRET_ACCESS_KEY: minio-test-secret
+      S3_BUCKET: portrait-test
+      SESSION_SECRET: integration-test-session-secret-at-least-32-bytes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.18"
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Start private test object storage
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio-test-secret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 30); do curl -fsS http://localhost:9000/minio/health/live && break; sleep 2; done
+          docker run --rm --network host --entrypoint /bin/sh \
+            -e MC_HOST_local=http://minio:minio-test-secret@localhost:9000 \
+            minio/mc:RELEASE.2025-04-16T18-13-26Z -c 'mc mb --ignore-existing local/portrait-test'
+      - run: uv sync --project services/api --frozen --all-groups
+      - run: uv sync --project services/worker --frozen --all-groups
+      - run: uv run --project services/api alembic -c services/api/alembic.ini upgrade head
+      - name: API and worker integration tests
+        run: |
+          uv run --project services/api pytest services/api/tests
+          uv run --project services/worker pytest services/worker/tests
+
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [web, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  openapi-drift:
+    runs-on: ubuntu-24.04
+    needs: [python, web]
+    env:
+      APP_ENV: test
+      ALLOW_HEURISTIC_ANALYZER: "true"
+      REQUIRE_MODELS_FOR_READINESS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.18"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: uv sync --project services/api --frozen --all-groups
+      - name: Generate schema from application object
+        run: |
+          uv run --project services/api python -c "import json,pathlib,sys; sys.path.insert(0,'services/api'); from app.main import app; pathlib.Path('/tmp/openapi.json').write_text(json.dumps(app.openapi(),sort_keys=True))"
+          test -f lib/api/schema.d.ts
+          ./node_modules/.bin/openapi-typescript /tmp/openapi.json --output /tmp/schema.d.ts
+          cmp /tmp/schema.d.ts lib/api/schema.d.ts

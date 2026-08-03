@@ -1,0 +1,1 @@
+Run migrations from services/api with: uv run alembic upgrade head

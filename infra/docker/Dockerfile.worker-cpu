@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+FROM ghcr.io/astral-sh/uv:0.11.18 AS uv
+FROM python:3.12.10-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH XDG_CACHE_HOME=/tmp/.cache TORCH_HOME=/tmp/torch
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+WORKDIR /app
+COPY --from=uv /uv /usr/local/bin/uv
+COPY packages/portrait_transfer ./packages/portrait_transfer
+COPY services/api ./services/api
+COPY services/worker ./services/worker
+COPY scripts/purge_expired_assets.py ./scripts/purge_expired_assets.py
+RUN uv sync --project services/worker --frozen --no-dev && chown -R app:app /app /opt/venv
+USER app
+CMD ["celery", "--workdir", "services/worker", "--app", "app.celery_app", "worker", "--loglevel", "INFO", "--queues", "portrait-cpu,maintenance", "--concurrency", "1", "--beat", "--schedule", "/tmp/celerybeat-schedule"]

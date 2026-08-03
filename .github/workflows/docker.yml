@@ -1,0 +1,64 @@
+name: Containers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  cpu-images-and-smoke:
+    runs-on: ubuntu-24.04
+    env:
+      APP_ENV: test
+      ALLOW_HEURISTIC_ANALYZER: "true"
+      REQUIRE_MODELS_FOR_READINESS: "false"
+      POSTGRES_PASSWORD: compose-test-postgres
+      DATABASE_URL: postgresql+psycopg://portrait:compose-test-postgres@postgres:5432/portrait_transfer
+      MINIO_ROOT_PASSWORD: compose-test-minio
+      S3_SECRET_ACCESS_KEY: compose-test-minio
+      SESSION_SECRET: compose-test-session-secret-at-least-32-bytes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build CPU images
+        run: docker compose build web api worker-cpu caddy
+      - name: Scan application images
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: portrait-style-transfer-api
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          sarif_file: trivy-results.sarif
+      - name: Apply database migrations
+        run: docker compose run --rm api alembic -c services/api/alembic.ini upgrade head
+      - name: Start stack and wait
+        run: docker compose up -d --wait --wait-timeout 240 postgres redis minio minio-init api worker-cpu web caddy
+      - name: API readiness smoke
+        run: python scripts/smoke_stack.py --url http://localhost:8000/api/v1/health/ready
+      - name: Full synthetic job smoke
+        run: python scripts/smoke_job.py --url http://localhost:8000/api/v1 --timeout 300
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  gpu-image:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker compose --profile gpu build worker-gpu
+      - name: Explain runtime boundary
+        run: echo 'Image build passed; CUDA execution still requires a separate GPU runner.'

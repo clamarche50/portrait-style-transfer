@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "portrait-transfer"
+version = "0.1.0"
+description = "Clean-room, source-aware portrait style transfer primitives"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "numpy>=2.0",
+  "scipy>=1.13",
+  "Pillow>=10.4",
+]
+
+[project.optional-dependencies]
+opencv = ["opencv-python-headless>=4.10"]
+vision = ["mediapipe>=0.10.21,<0.11", "opencv-python-headless>=4.10"]
+gpu = ["torch>=2.3", "kornia>=0.7.3"]
+test = ["pytest>=8.2", "hypothesis>=6.108"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/portrait_transfer"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

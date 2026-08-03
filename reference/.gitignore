@@ -1,0 +1,7 @@
+original-matlab/
+original-paper/
+uploads/
+manifests/*.json
+manifests/*.md
+manifests/*.sha256
+!manifests/.gitkeep

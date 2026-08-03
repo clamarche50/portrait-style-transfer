@@ -1,0 +1,7 @@
+FROM caddy:2.8.4-alpine
+
+RUN addgroup -S -g 10001 caddy-runtime \
+    && adduser -S -D -H -u 10001 -G caddy-runtime caddy-runtime \
+    && chown -R caddy-runtime:caddy-runtime /data /config
+
+USER caddy-runtime
