@@ -90,3 +90,5 @@ redis-data/
 minio-data/
 .terraform/
 *.tfstate*
+
+.cloudflare-tunnel-token

@@ -67,6 +67,79 @@ from .types import (
 )
 
 
+def estimate_similarity_with_fallback(
+    input_landmarks,
+    reference_landmarks,
+    operations,
+    destination_shape,
+):
+    attempts = [
+        {
+            "name": "strict_4pt",
+            "include_nose": True,
+            "ransac_threshold": 0.04,
+            "min_inliers": 3,
+            "max_rotation_degrees": 30.0,
+        },
+        {
+            "name": "strict_3pt",
+            "include_nose": False,
+            "ransac_threshold": 0.04,
+            "min_inliers": 3,
+            "max_rotation_degrees": 30.0,
+        },
+        {
+            "name": "relaxed_3pt",
+            "include_nose": False,
+            "ransac_threshold": 0.06,
+            "min_inliers": 3,
+            "max_rotation_degrees": 35.0,
+        },
+        {
+            "name": "fallback_2inlier",
+            "include_nose": False,
+            "ransac_threshold": 0.08,
+            "min_inliers": 2,
+            "max_rotation_degrees": 40.0,
+        },
+    ]
+
+    last_exc = None
+
+    for attempt in attempts:
+        try:
+            input_anchor_points = alignment_anchors(
+                input_landmarks,
+                include_nose=attempt["include_nose"],
+            )
+            reference_anchor_points = alignment_anchors(
+                reference_landmarks,
+                include_nose=attempt["include_nose"],
+            )
+
+            input_anchor_points, reference_anchor_points = corrected_alignment_points(
+                input_anchor_points,
+                reference_anchor_points,
+                operations,
+            )
+
+            affine_map, similarity = estimate_similarity_backward_map(
+                reference_anchor_points,
+                input_anchor_points,
+                destination_shape,
+                ransac_threshold=attempt["ransac_threshold"],
+                min_inliers=attempt["min_inliers"],
+                max_rotation_degrees=attempt["max_rotation_degrees"],
+            )
+
+            return affine_map, similarity, attempt["name"]
+
+        except AlignmentFailure as exc:
+            last_exc = exc
+
+    raise last_exc or AlignmentFailure("Failed to estimate similarity transform")
+
+
 def create_default_runtime(
     *,
     enable_cpu_dense: bool = True,
@@ -338,11 +411,15 @@ def transfer_portrait_style(
             reference_anchor_points,
             operations,
         )
-        affine_map, similarity = estimate_similarity_backward_map(
-            reference_anchor_points,
-            input_anchor_points,
+        affine_map, similarity, alignment_mode = estimate_similarity_with_fallback(
+            input_context.landmarks,
+            reference_context.landmarks,
+            operations,
             (int(input_crop.shape[0]), int(input_crop.shape[1])),
         )
+
+        if alignment_mode != "strict_4pt":
+            warnings.append(f"alignment_fallback:{alignment_mode}")
         aligned_reference_landmarks = transform_points(
             reference_context.landmarks, similarity.matrix
         )
