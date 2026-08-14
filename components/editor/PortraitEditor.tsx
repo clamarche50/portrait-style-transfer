@@ -106,18 +106,18 @@ export function PortraitEditor() {
       <section className="editor-hero">
         <div className="editor-hero__copy">
           <p className="kicker"><span /> Research-grade portrait finishing</p>
-          <h1>Move the light.<br /><em>Keep the person.</em></h1>
-          <p>Borrow local contrast, color, texture, and broad illumination from one headshot—without redrawing the face beneath it.</p>
+          <h1>Move the light.<br /><em>Shape the finish.</em></h1>
+          <p>Guide color, texture, and illumination with a reference headshot while using the source pose and facial geometry as structure. This is a generative edit: review likeness and details before use.</p>
         </div>
         <div className="method-note">
           <span>01</span>
-          <p><strong>Not a generative filter.</strong> The pipeline aligns both portraits, measures local energy across six scales, then reshapes the input’s own detail.</p>
+          <p><strong>AI portrait transfer.</strong> DGPST separates source structure from reference appearance, then synthesizes a controlled result with diffusion.</p>
         </div>
       </section>
 
       <section className="editor-workspace" aria-label="Portrait style transfer editor">
         <div className="upload-column">
-          <PortraitDropzone eyebrow="01 · Identity" title="Choose your portrait" description="One front-facing headshot with clear eyes and fine facial detail." file={inputFile} onFile={setInputFile} tone="warm" />
+          <PortraitDropzone eyebrow="01 · Source" title="Choose your portrait" description="One front-facing headshot with clear eyes and fine facial detail." file={inputFile} onFile={setInputFile} tone="warm" />
         </div>
         <div className="upload-column">
           <div className="reference-tabs" role="tablist" aria-label="Reference source">
@@ -152,7 +152,7 @@ export function PortraitEditor() {
       <section className="action-dock">
         <div>
           {privacyLine}
-          <span className="requirements-line"><ShieldCheck size={14} aria-hidden="true" /> One near-frontal face · minimum 150 px between eyes · max 15 MB</span>
+          <span className="requirements-line"><ShieldCheck size={14} aria-hidden="true" /> One near-frontal face · minimum 150 px between eyes · max 15 MB / 8 megapixels</span>
         </div>
         <button className="button button--create" type="button" disabled={!canSubmit} onClick={submit}>
           {submitting ? "Securing uploads…" : "Create portrait"}<ArrowRight size={19} aria-hidden="true" />
@@ -170,10 +170,10 @@ export function PortraitEditor() {
       )}
 
       <section className="method-strip" aria-label="How the portrait transfer works">
-        <div><span>01</span><strong>Align</strong><p>Eyes, mouth, feature lines, then dense descriptors.</p></div>
-        <div><span>02</span><strong>Decompose</strong><p>Six full-resolution detail bands plus broad light.</p></div>
-        <div><span>03</span><strong>Transfer</strong><p>Robust local gains reshape your original detail.</p></div>
-        <div><span>04</span><strong>Rebuild</strong><p>Gamut-safe color, matte, eyes, and background.</p></div>
+        <div><span>01</span><strong>Understand</strong><p>Encode source structure and reference appearance separately.</p></div>
+        <div><span>02</span><strong>Correspond</strong><p>Match semantic portrait regions before transferring style.</p></div>
+        <div><span>03</span><strong>Generate</strong><p>Use structure-guided diffusion to protect pose and facial geometry.</p></div>
+        <div><span>04</span><strong>Finish</strong><p>Restore the requested background, format, and original composition.</p></div>
       </section>
     </>
   );

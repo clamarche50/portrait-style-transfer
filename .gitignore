@@ -39,6 +39,7 @@ venv/
 outputs/
 work/
 tmp/
+.tmp/
 .celerybeat-schedule
 *.pid
 *.log
@@ -61,6 +62,10 @@ models/*.bin
 models/*.pt
 models/*.pth
 models/.downloads/
+# DGPST weights are provisioned locally. Only provenance/docs are versioned.
+models/dgpst/*
+!models/dgpst/manifest.json
+!models/dgpst/README.md
 
 # Original research material: never track or ship
 reference/original-matlab/

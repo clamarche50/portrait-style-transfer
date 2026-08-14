@@ -882,6 +882,7 @@ source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "celery" },
+    { name = "httpx" },
     { name = "mediapipe" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -911,6 +912,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = "==1.40.40" },
     { name = "celery", specifier = "==5.5.3" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "mediapipe", specifier = "==0.10.31" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "opencv-python-headless", specifier = "==4.12.0.88" },

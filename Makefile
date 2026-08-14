@@ -7,7 +7,7 @@ REFERENCE_SOURCE_DIR ?= reference/original-matlab
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap extract-reference audit-reference models dev dev-down lint format \
+.PHONY: help bootstrap extract-reference audit-reference models models-dgpst verify-models dev dev-down lint format \
 	typecheck test test-unit test-legacy-primitives compare-profiles test-integration \
 	test-web test-e2e test-real-models build docker-build smoke benchmark openapi \
 	migrate purge-expired
@@ -29,6 +29,14 @@ audit-reference:
 
 models:
 	$(PYTHON) scripts/download_models.py --manifest models/manifest.json --output-dir "$(MODEL_OUTPUT_DIR)"
+	$(MAKE) models-dgpst
+
+models-dgpst:
+	$(UV) run --with huggingface-hub==0.25.2 --with gdown==5.2.0 python scripts/provision_dgpst_models.py --download
+
+verify-models:
+	$(PYTHON) scripts/download_models.py --manifest models/manifest.json --output-dir "$(MODEL_OUTPUT_DIR)" --offline
+	$(PYTHON) scripts/provision_dgpst_models.py --verify-only
 
 dev:
 	$(COMPOSE) up --build
@@ -38,11 +46,11 @@ dev-down:
 
 lint:
 	$(NPM) run lint
-	$(UV) run --project services/api ruff check packages/portrait_transfer services/api services/worker scripts
+	$(UV) run --project services/api ruff check packages/portrait_transfer services/api services/worker services/ai_engine scripts
 
 format:
-	$(UV) run --project services/api ruff format packages/portrait_transfer services/api services/worker scripts
-	$(UV) run --project services/api ruff check --fix packages/portrait_transfer services/api services/worker scripts
+	$(UV) run --project services/api ruff format packages/portrait_transfer services/api services/worker services/ai_engine scripts
+	$(UV) run --project services/api ruff check --fix packages/portrait_transfer services/api services/worker services/ai_engine scripts
 
 typecheck:
 	$(NPM) exec tsc -- --noEmit
@@ -62,6 +70,7 @@ compare-profiles:
 test-integration:
 	$(UV) run --project services/api pytest services/api/tests
 	$(UV) run --project services/worker pytest services/worker/tests
+	PYTHONPATH=. $(UV) run --project services/api pytest services/ai_engine/tests
 
 test-web:
 	$(NPM) test
@@ -79,11 +88,11 @@ build:
 	$(UV) build --project services/worker
 
 docker-build:
-	$(COMPOSE) build web api worker-cpu caddy
+	$(COMPOSE) build web api ai-engine worker-cpu caddy
 
 smoke:
 	$(COMPOSE) run --rm api alembic -c services/api/alembic.ini upgrade head
-	$(COMPOSE) up -d --build --wait --wait-timeout 240 web api worker-cpu postgres redis minio minio-init caddy
+	$(COMPOSE) up -d --build --wait --wait-timeout 900 web api ai-engine worker-cpu postgres redis minio minio-init caddy
 	$(PYTHON) scripts/smoke_stack.py --url http://localhost:8000/api/v1/health/ready
 
 benchmark:

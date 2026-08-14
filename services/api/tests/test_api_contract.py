@@ -69,13 +69,26 @@ def test_upload_normalizes_metadata_and_enforces_anonymous_ownership(api: ApiHar
     with Image.open(io.BytesIO(stored)) as normalized:
         assert "private-note" not in normalized.info
 
+    protected_download = api.client.get(f"/api/v1/assets/{asset['id']}/content?download=true")
+    assert protected_download.status_code == 403
+
     signed = api.client.post(
         f"/api/v1/assets/{asset['id']}/download-url",
         headers=api.unsafe_headers,
     )
     assert signed.status_code == 200
-    assert signed.json()["url"].endswith(f"/api/v1/assets/{asset['id']}/content?download=true")
+    assert signed.json()["url"] == f"/api/v1/assets/{asset['id']}/content?download=true"
     assert signed.json()["expires_at"]
+    assert "pst_download=" in signed.headers["set-cookie"]
+    assert "HttpOnly" in signed.headers["set-cookie"]
+    assert "SameSite=strict" in signed.headers["set-cookie"]
+    assert "token=" not in signed.json()["url"]
+
+    downloaded = api.client.get(signed.json()["url"])
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-disposition"].startswith("attachment")
+    replay = api.client.get(signed.json()["url"])
+    assert replay.status_code == 403
 
     content = api.client.get(f"/api/v1/assets/{asset['id']}/content")
     assert content.status_code == 200
@@ -98,13 +111,31 @@ def test_reference_job_lifecycle_sse_cancel_and_download(
         json={
             "input_asset_id": input_asset["id"],
             "reference_asset_id": reference_asset["id"],
-            "settings": {"algorithm_profile": "paper_exact", "dense_alignment": False},
+            "settings": {
+                "algorithm_profile": "ai_dgpst_v1",
+                "style_strength": 0.8,
+                "structure_strength": 0.95,
+                "inference_steps": 24,
+                "random_seed": 7,
+            },
         },
         headers=api.unsafe_headers,
     )
     assert response.status_code == 202, response.text
     job = response.json()
     assert job["status"] == "QUEUED"
+    assert job["algorithm_profile"] == "ai_dgpst_v1"
+    assert job["settings"] == {
+        "algorithm_profile": "ai_dgpst_v1",
+        "style_strength": 0.8,
+        "structure_strength": 0.95,
+        "inference_steps": 24,
+        "random_seed": 7,
+        "background_mode": "KEEP",
+        "background_color": None,
+        "output_format": "PNG",
+        "jpeg_quality": 95,
+    }
     assert api.queue.transfers == [(job["id"], False)]
 
     cancelled = api.client.post(f"/api/v1/jobs/{job['id']}/cancel", headers=api.unsafe_headers)
@@ -122,6 +153,58 @@ def test_reference_job_lifecycle_sse_cancel_and_download(
         f"/api/v1/jobs/{job['id']}/download-url", headers=api.unsafe_headers
     )
     assert no_output.status_code == 409
+
+
+def test_job_settings_reject_classical_engine_controls(
+    api: ApiHarness, portrait_png: bytes
+) -> None:
+    input_asset = _upload(api, "INPUT", portrait_png)
+    reference_asset = _upload(api, "REFERENCE", png_bytes((180, 140, 110)))
+    response = api.client.post(
+        "/api/v1/jobs",
+        json={
+            "input_asset_id": input_asset["id"],
+            "reference_asset_id": reference_asset["id"],
+            "settings": {
+                "algorithm_profile": "paper_exact",
+                "transfer_strength": 1.0,
+                "dense_alignment": True,
+            },
+        },
+        headers=api.unsafe_headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_openapi_exposes_only_ai_native_transfer_controls(api: ApiHarness) -> None:
+    settings_schema = api.client.get("/openapi.json").json()["components"]["schemas"][
+        "TransferSettingsRequest"
+    ]
+    properties = settings_schema["properties"]
+
+    assert set(properties) == {
+        "algorithm_profile",
+        "style_strength",
+        "structure_strength",
+        "inference_steps",
+        "random_seed",
+        "background_mode",
+        "background_color",
+        "output_format",
+        "jpeg_quality",
+    }
+    assert properties["algorithm_profile"]["default"] == "ai_dgpst_v1"
+    assert properties["style_strength"]["default"] == 0.75
+    assert properties["structure_strength"]["default"] == 0.9
+    assert properties["inference_steps"] == {
+        "default": 30,
+        "maximum": 50,
+        "minimum": 10,
+        "title": "Inference Steps",
+        "type": "integer",
+    }
 
 
 def test_style_crud_index_and_rank_use_real_feature_code(api: ApiHarness) -> None:
@@ -174,7 +257,7 @@ def test_style_crud_index_and_rank_use_real_feature_code(api: ApiHarness) -> Non
         json={
             "input_asset_id": input_asset["id"],
             "style_id": style_id,
-            "settings": {"algorithm_profile": "paper_exact"},
+            "settings": {"algorithm_profile": "ai_dgpst_v1"},
         },
         headers=api.unsafe_headers,
     )
@@ -297,7 +380,9 @@ def test_deleting_one_example_keeps_shared_asset_until_last_reference(api: ApiHa
         assert asset is not None and asset.deleted_at is not None
 
 
-def test_corrections_remove_downstream_cache_without_exposing_keys(api: ApiHarness) -> None:
+def test_ai_background_correction_forces_full_rerun_and_clears_private_cache(
+    api: ApiHarness,
+) -> None:
     input_asset = _upload(api, "INPUT", png_bytes())
     reference_asset = _upload(api, "REFERENCE", png_bytes((170, 150, 120)))
     created = api.client.post(
@@ -338,7 +423,7 @@ def test_corrections_remove_downstream_cache_without_exposing_keys(api: ApiHarne
         repository.mark_succeeded(
             job,
             {
-                "summary": {"profile": "paper_exact"},
+                "summary": {"profile": "ai_dgpst_v1"},
                 "private_cache_manifest": {
                     "affine": {"key": affine_key, "stage": "AFFINE_ALIGNMENT"},
                     "gain": {"key": gain_key, "stage": "MULTISCALE_TRANSFER"},
@@ -356,17 +441,16 @@ def test_corrections_remove_downstream_cache_without_exposing_keys(api: ApiHarne
         json={
             "corrections": [
                 {
-                    "type": "gain_copy",
-                    "source_polygon": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
-                    "target_polygon": [[0.3, 0.3], [0.4, 0.3], [0.4, 0.4]],
-                    "levels": [0, 1],
+                    "type": "background",
+                    "mode": "BLUR",
+                    "color": None,
                 }
             ]
         },
         headers=api.unsafe_headers,
     )
     assert corrected.status_code == 200, corrected.text
-    assert affine_key in api.storage.objects
+    assert affine_key not in api.storage.objects
     assert gain_key not in api.storage.objects
 
     rerun = api.client.post(f"/api/v1/jobs/{job_id}/rerun", headers=api.unsafe_headers)
@@ -376,14 +460,12 @@ def test_corrections_remove_downstream_cache_without_exposing_keys(api: ApiHarne
         assert job is not None
         assert job.status == JobStatus.QUEUED
         assert job.diagnostics["resume"] == {
-            "requested_stage": "MULTISCALE_TRANSFER",
-            "cache_reuse": True,
+            "requested_stage": "VALIDATING",
+            "cache_reuse": False,
         }
 
 
-def test_each_correction_request_invalidates_from_its_own_earliest_stage(
-    api: ApiHarness,
-) -> None:
+def test_ai_job_rejects_classical_corrections(api: ApiHarness) -> None:
     input_asset = _upload(api, "INPUT", png_bytes())
     reference_asset = _upload(api, "REFERENCE", png_bytes((170, 150, 120)))
     created = api.client.post(
@@ -398,7 +480,7 @@ def test_each_correction_request_invalidates_from_its_own_earliest_stage(
         assert job is not None
         JobRepository(db).mark_failed(job, code="SYNTHETIC", safe_message="Synthetic failure")
 
-    mask = api.client.post(
+    rejected = api.client.post(
         f"/api/v1/jobs/{job_id}/corrections",
         json={
             "corrections": [
@@ -412,28 +494,12 @@ def test_each_correction_request_invalidates_from_its_own_earliest_stage(
         },
         headers=api.unsafe_headers,
     )
-    assert mask.status_code == 200, mask.text
-    eye = api.client.post(
-        f"/api/v1/jobs/{job_id}/corrections",
-        json={
-            "corrections": [
-                {
-                    "type": "eye",
-                    "eye": "LEFT",
-                    "pupil_center": [0.42, 0.38],
-                    "iris_radius": 0.025,
-                }
-            ]
-        },
-        headers=api.unsafe_headers,
-    )
-    assert eye.status_code == 200, eye.text
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "AI_CORRECTION_UNSUPPORTED"
     with Session(api.engine) as db:
         job = db.get(Job, job_id)
         assert job is not None
-        invalidation = job.diagnostics["cache_invalidation"]
-        assert invalidation["resume_from_stage"] == "EYE_HIGHLIGHTS"
-        assert len(job.corrections or []) == 2
+        assert not job.corrections
 
 
 def test_progress_store_terminal_snapshot_is_sse_safe(api: ApiHarness, portrait_png: bytes) -> None:

@@ -21,6 +21,7 @@ from portrait_api.dependencies import (
 from portrait_api.errors import AppError
 from portrait_api.metrics import JOBS, STORAGE_ERRORS
 from portrait_api.models import (
+    AlgorithmProfile,
     ArtifactKind,
     AssetKind,
     Job,
@@ -37,6 +38,7 @@ from portrait_api.schemas.jobs import (
     JobDiagnosticsResponse,
     JobResponse,
 )
+from portrait_api.security import DownloadTokenSigner
 from portrait_api.services.corrections import build_invalidation_plan
 from portrait_api.services.queue import TaskQueue
 from portrait_api.services.redis_gateway import ProgressStore
@@ -100,12 +102,11 @@ def _event(job: Job, message: str) -> dict[str, object]:
 
 
 def _enqueue(job: Job, queue: TaskQueue, config: Settings) -> str:
-    use_gpu = bool(
-        config.enable_gpu
-        and job.settings.get("dense_alignment", True)
-        and config.dense_alignment_device.lower().startswith("cuda")
-    )
-    return queue.enqueue_transfer(str(job.id), use_gpu=use_gpu)
+    # The CPU Celery worker orchestrates the isolated GPU inference sidecar.
+    # Routing this task to the legacy in-process GPU queue would strand jobs
+    # whenever ENABLE_GPU is set for unrelated dense-alignment tooling.
+    del config
+    return queue.enqueue_transfer(str(job.id), use_gpu=False)
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -407,6 +408,7 @@ async def delete_job(
 @router.post("/{job_id}/download-url", response_model=DownloadUrlResponse)
 def job_download_url(
     job_id: uuid.UUID,
+    response: Response,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
     config: Settings = Depends(get_settings_from_app),
@@ -417,6 +419,7 @@ def job_download_url(
     output = JobRepository(db).output_asset(job.id)
     if output is None:
         raise AppError("OUTPUT_NOT_FOUND", "The job output was not found.", 404)
+    DownloadTokenSigner(config).set_cookie(response, output.id, principal.session_id)
     return DownloadUrlResponse(
         url=asset_content_url(config, output.id, download=True),
         expires_in_seconds=config.signed_url_ttl_seconds,
@@ -466,6 +469,14 @@ def save_corrections(
     if job.status not in TERMINAL_JOB_STATUSES or job.status == JobStatus.EXPIRED:
         raise AppError("JOB_NOT_EDITABLE", "Corrections require a completed or failed job.", 409)
     new_corrections = [item.model_dump(mode="json") for item in payload.corrections]
+    ai_job = job.algorithm_profile == AlgorithmProfile.AI_DGPST_V1
+    if ai_job and any(correction.get("type") != "background" for correction in new_corrections):
+        raise AppError(
+            "AI_CORRECTION_UNSUPPORTED",
+            "AI jobs support background corrections only; "
+            "create a new job to change transfer controls.",
+            422,
+        )
     combined = [*(job.corrections or []), *new_corrections]
     if len(combined) > 256:
         raise AppError("TOO_MANY_CORRECTIONS", "Too many correction operations were supplied.", 422)
@@ -494,13 +505,25 @@ def save_corrections(
                     storage.delete(key)
             else:
                 retained_manifest[str(name)] = metadata
+    if ai_job:
+        for metadata in retained_manifest.values():
+            if not isinstance(metadata, dict):
+                continue
+            key = metadata.get("key")
+            if isinstance(key, str):
+                storage.delete(key)
+        retained_manifest = {}
+        storage.delete_prefix(f"jobs/{job.id}/cache/")
     for invalidated_stage in plan.invalidated_stages:
         storage.delete_prefix(f"jobs/{job.id}/cache/{invalidated_stage.value.lower()}/")
     diagnostics["private_cache_manifest"] = retained_manifest
     diagnostics["cache_invalidation"] = {
-        "resume_from_stage": plan.earliest_stage.value,
+        "resume_from_stage": (
+            ProcessingStage.VALIDATING.value if ai_job else plan.earliest_stage.value
+        ),
         "invalidated_stages": [stage.value for stage in plan.invalidated_stages],
         "correction_hash": plan.correction_hash,
+        "full_ai_rerun": ai_job,
     }
     job.corrections = combined
     job.diagnostics = diagnostics
@@ -528,11 +551,16 @@ async def rerun_job(
     _delete_job_artifacts(request, db, job, storage)
     diagnostics = dict(job.diagnostics or {})
     invalidation = diagnostics.get("cache_invalidation", {})
-    resume_stage = invalidation.get("resume_from_stage", ProcessingStage.VALIDATING.value)
     cache_manifest = diagnostics.get("private_cache_manifest", {})
+    ai_job = job.algorithm_profile == AlgorithmProfile.AI_DGPST_V1
+    resume_stage = (
+        ProcessingStage.VALIDATING.value
+        if ai_job
+        else invalidation.get("resume_from_stage", ProcessingStage.VALIDATING.value)
+    )
     diagnostics["resume"] = {
         "requested_stage": resume_stage,
-        "cache_reuse": isinstance(cache_manifest, dict) and bool(cache_manifest),
+        "cache_reuse": not ai_job and isinstance(cache_manifest, dict) and bool(cache_manifest),
     }
     repository.reset_for_rerun(job, diagnostics=diagnostics)
     job.expires_at = datetime.now(UTC) + timedelta(hours=config.asset_ttl_hours)

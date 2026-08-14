@@ -11,12 +11,21 @@ def test_production_session_secret_requires_at_least_32_characters() -> None:
             app_env="production",
             session_secret="changed-but-too-short",
             s3_server_side_encryption="AES256",
+            ai_engine_api_token="an-internal-ai-token-with-32-characters",
+        )
+
+    with pytest.raises(ValidationError, match="AI_ENGINE_API_TOKEN"):
+        Settings(
+            app_env="production",
+            session_secret="a-production-secret-with-32-chars-minimum",
+            s3_server_side_encryption="AES256",
         )
 
     settings = Settings(
         app_env="production",
         session_secret="a-production-secret-with-32-chars-minimum",
         s3_server_side_encryption="AES256",
+        ai_engine_api_token="an-internal-ai-token-with-32-characters",
     )
     assert settings.cookie_secure
 

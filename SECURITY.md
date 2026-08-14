@@ -20,6 +20,13 @@ Security fixes target the current default branch until versioned releases are pu
 - Enforce ownership, upload/job quotas, rate limits, processing timeouts, and memory limits.
 - Use strict CORS, CSRF protection for cookie-authenticated mutations, secure cookies, CSP, HSTS, `nosniff`, and `no-referrer` in production.
 - Run containers as non-root with a read-only root filesystem where practical.
+- Keep the DGPST service on the private Compose network; never publish port 8010
+  or route a public tunnel directly to it.
+- Verify every model artifact against the pinned manifest before loading it.
+  Load the legacy PyTorch checkpoint with restricted `weights_only` semantics;
+  never deserialize an unverified replacement.
+- Keep Hugging Face clients offline at inference time and never send portrait
+  pixels to a hosted model API without a separate, explicit product decision.
 - Store no face-recognition embeddings and perform no identity or demographic inference.
 - Purge expired assets and audit failed deletions.
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import io
 import re
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict, is_dataclass, replace
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from tempfile import TemporaryDirectory
@@ -31,17 +30,8 @@ from portrait_api.models import (
 from portrait_api.repositories import AssetRepository, JobRepository
 from portrait_api.services.ranking import StyleRankingService
 from portrait_api.time import is_expired
-from portrait_transfer import (
-    AlgorithmProfile as CoreAlgorithmProfile,
-)
-from portrait_transfer import (
-    BackgroundMode as CoreBackgroundMode,
-)
-from portrait_transfer import (
-    TransferSettings,
-    create_default_runtime,
-    transfer_portrait_style,
-)
+from portrait_transfer.alignment.anchors import eye_centers
+from portrait_transfer.config import ImageLimits, PreflightThresholds
 from portrait_transfer.exceptions import (
     InputValidationError,
     PortraitTransferError,
@@ -51,10 +41,15 @@ from portrait_transfer.image_io import decode_image, encode_jpeg, encode_png
 from portrait_transfer.preflight import PortraitAnalyzer, analyze_portrait
 from portrait_transfer.selection import build_style_feature
 from portrait_transfer.style_ingestion import IngestedStyle, ingest_style
-from portrait_transfer.types import EyeHighlightAsset, StyleFeature
+from portrait_transfer.types import EyeHighlightAsset, PortraitAnalysis, StyleFeature
+from portrait_worker.ai_client import (
+    AI_ENGINE_ID,
+    AIEngineError,
+    AIEngineResponse,
+    get_ai_engine_client,
+)
 from portrait_worker.celery_app import celery_app
 from portrait_worker.cleanup import purge_expired_records
-from portrait_worker.gpu_dense import build_dense_backend
 from portrait_worker.infrastructure import WorkerInfrastructure, get_infrastructure
 from portrait_worker.mediapipe_adapter import build_portrait_analyzer
 from portrait_worker.progress import JobLeaseLost, JobProgressReporter
@@ -68,6 +63,7 @@ class StyleSelectionFailure(RuntimeError):
 
 
 TaskCallable = TypeVar("TaskCallable", bound=Callable[..., object])
+_AI_RESPONSE_MAX_ENCODED_BYTES = 96 * 1024 * 1024
 
 
 def _celery_task(**options: object) -> Callable[[TaskCallable], TaskCallable]:
@@ -99,70 +95,35 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _decode_limits(settings: object, *, max_encoded_bytes: int) -> ImageLimits:
+    return ImageLimits(
+        max_encoded_bytes=max_encoded_bytes,
+        max_decoded_pixels=int(getattr(settings, "max_decoded_pixels", 8_000_000)),
+        max_original_long_edge=int(getattr(settings, "max_original_long_edge", 8_000)),
+    )
+
+
+def _bounded_diagnostic_strength(value: object, fallback: object) -> float:
+    try:
+        default = float(cast(Any, fallback))
+    except (TypeError, ValueError):
+        return 0.0
+    if not np.isfinite(default) or not 0.0 <= default <= 1.0:
+        default = 0.0
+    try:
+        candidate = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return default
+    return candidate if np.isfinite(candidate) and 0.0 <= candidate <= 1.0 else default
+
+
 def _hex_color(value: str | None) -> tuple[float, float, float] | None:
     if value is None:
         return None
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
-        raise ValueError("Invalid solid background color")
+        raise InputValidationError("Invalid solid background color")
     red, green, blue = (int(value[index : index + 2], 16) / 255.0 for index in (1, 3, 5))
     return red, green, blue
-
-
-def _translate_corrections(corrections: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    operations: list[dict[str, Any]] = []
-    for correction in corrections:
-        correction_type = correction.get("type")
-        if correction_type == "mask":
-            value = 1.0 if correction["operation"] == "ADD" else 0.0
-            for target in ("head", "foreground_alpha"):
-                operations.append(
-                    {
-                        "type": "mask_stroke",
-                        "target": target,
-                        "points": correction["points"],
-                        "radius": correction["radius"],
-                        "value": value,
-                        "coordinate_space": "normalized",
-                    }
-                )
-        elif correction_type == "alignment":
-            operations.append(
-                {
-                    "type": "alignment_points",
-                    "input_points": correction["input_points"],
-                    "reference_points": correction["reference_points"],
-                    "coordinate_space": "normalized",
-                }
-            )
-        elif correction_type == "gain_copy":
-            for channel in range(3):
-                for level in correction.get("levels", range(6)):
-                    operations.append(
-                        {
-                            "type": "gain_constraint",
-                            "channel": channel,
-                            "level": level,
-                            "mode": "COPY_FROM_REGION",
-                            "polygon": correction["target_polygon"],
-                            "source_polygon": correction["source_polygon"],
-                            "coordinate_space": "normalized",
-                        }
-                    )
-        elif correction_type == "eye":
-            operation: dict[str, Any] = {
-                "type": "eye_center",
-                "eye": str(correction["eye"]).lower(),
-                "center": correction["pupil_center"],
-                "coordinate_space": "normalized",
-            }
-            if correction.get("iris_radius") is not None:
-                operation["radius"] = correction["iris_radius"]
-            if correction.get("highlight_scale") is not None:
-                operation["highlight_scale"] = correction["highlight_scale"]
-            if correction.get("highlight_rotation_degrees") is not None:
-                operation["highlight_rotation_degrees"] = correction["highlight_rotation_degrees"]
-            operations.append(operation)
-    return operations
 
 
 def _latest_background_correction(
@@ -177,188 +138,159 @@ def _latest_background_correction(
     return mode, color
 
 
-def _core_settings(
+def _ai_settings(
     job_settings: dict[str, Any], corrections: list[dict[str, Any]]
-) -> TransferSettings:
+) -> dict[str, object]:
     background_mode, background_color = _latest_background_correction(job_settings, corrections)
-    return TransferSettings(
-        algorithm_profile=CoreAlgorithmProfile(
-            str(job_settings.get("algorithm_profile", "paper_exact"))
-        ),
-        transfer_strength=float(job_settings.get("transfer_strength", 1.0)),
-        residual_strength=float(job_settings.get("residual_strength", 1.0)),
-        global_range_mix=float(job_settings.get("global_range_mix", 0.25)),
-        eye_highlights=bool(job_settings.get("eye_highlights", True)),
-        background_mode=CoreBackgroundMode(background_mode),
-        background_color=_hex_color(background_color),
-        dense_alignment=bool(job_settings.get("dense_alignment", True)),
-        processing_long_edge=int(job_settings.get("processing_long_edge", 1280)),
-        debug_artifacts=bool(job_settings.get("debug_artifacts", False)),
-        random_seed=int(job_settings.get("random_seed", 0)),
-    )
+    background_mode = background_mode.upper()
+    if background_mode not in {"KEEP", "BLUR", "SOLID", "REFERENCE"}:
+        raise InputValidationError("Unsupported background mode")
+    if background_mode == "SOLID":
+        if _hex_color(background_color) is None:
+            raise InputValidationError("A solid background color is required")
+    elif background_color is not None:
+        raise InputValidationError("A background color is only valid for solid backgrounds")
 
-
-def _artifact_stage(name: str) -> ProcessingStage:
-    lowered = name.lower()
-    if lowered.startswith("resume."):
-        if lowered == "resume.post_eye_rgb" or lowered.endswith(".background"):
-            return ProcessingStage.EYE_HIGHLIGHTS
-        if lowered == "resume.pre_eye_rgb" or lowered.endswith(".eyes"):
-            return ProcessingStage.MULTISCALE_TRANSFER
-        return ProcessingStage.DENSE_ALIGNMENT
-    if "mask" in lowered:
-        return ProcessingStage.SEGMENTATION
-    if any(token in lowered for token in ("map", "flow", "align")):
-        return ProcessingStage.DENSE_ALIGNMENT
-    if any(token in lowered for token in ("band", "energy", "gain", "residual")):
-        return ProcessingStage.MULTISCALE_TRANSFER
-    if "eye" in lowered or "iris" in lowered:
-        return ProcessingStage.EYE_HIGHLIGHTS
-    if "background" in lowered:
-        return ProcessingStage.BACKGROUND
-    return ProcessingStage.POSTPROCESSING
-
-
-def _requested_resume_stage(diagnostics: dict[str, Any]) -> str | None:
-    resume = diagnostics.get("resume", {})
-    if not isinstance(resume, dict):
-        return None
-    requested = str(resume.get("requested_stage", "")).upper()
-    return {
-        ProcessingStage.MULTISCALE_TRANSFER.value: "multiscale",
-        ProcessingStage.EYE_HIGHLIGHTS.value: "eyes",
-        ProcessingStage.BACKGROUND.value: "background",
-    }.get(requested)
-
-
-def _artifact_kind(name: str) -> ArtifactKind:
-    lowered = name.lower()
-    if "input" in lowered and "mask" in lowered:
-        return ArtifactKind.INPUT_MASK
-    if "reference" in lowered and "mask" in lowered:
-        return ArtifactKind.REFERENCE_MASK
-    if "gain" in lowered:
-        return ArtifactKind.GAIN
-    if "energy" in lowered:
-        return ArtifactKind.ENERGY
-    if "dense" in lowered or "flow" in lowered:
-        return ArtifactKind.DENSE_PREVIEW
-    if "affine" in lowered:
-        return ArtifactKind.AFFINE_PREVIEW
-    return ArtifactKind.OTHER
-
-
-def _thumbnail(array: NDArray[Any]) -> tuple[bytes, int, int]:
-    value = np.asarray(array, dtype=np.float32)
-    if value.ndim == 3 and value.shape[2] == 2:
-        value = np.linalg.norm(value, axis=2)
-    if value.ndim == 2:
-        finite = value[np.isfinite(value)]
-        low = float(np.percentile(finite, 1)) if finite.size else 0.0
-        high = float(np.percentile(finite, 99)) if finite.size else 1.0
-        normalized = np.clip((value - low) / max(high - low, 1e-6), 0.0, 1.0)
-        value = np.repeat(normalized[..., None], 3, axis=2)
-    elif value.ndim == 3 and value.shape[2] >= 3:
-        value = value[..., :3]
-        finite = value[np.isfinite(value)]
-        if finite.size and (float(finite.min()) < 0.0 or float(finite.max()) > 1.0):
-            low, high = np.percentile(finite, (1, 99))
-            value = (value - float(low)) / max(float(high - low), 1e-6)
-        value = np.clip(value, 0.0, 1.0)
-    else:
-        value = np.zeros((32, 32, 3), dtype=np.float32)
-    from PIL import Image
-
-    image = Image.fromarray(np.rint(value * 255).astype(np.uint8), mode="RGB")
-    image.thumbnail((256, 256), Image.Resampling.LANCZOS)
-    output = io.BytesIO()
-    image.save(output, "PNG", optimize=False, compress_level=6)
-    return output.getvalue(), image.width, image.height
-
-
-def _load_resume_artifacts(
-    infrastructure: WorkerInfrastructure, diagnostics: dict[str, Any]
-) -> dict[str, NDArray[np.float32]]:
-    manifest = diagnostics.get("private_cache_manifest", {})
-    loaded: dict[str, NDArray[np.float32]] = {}
-    if not isinstance(manifest, dict):
-        return loaded
-    loaded_bytes = 0
-    for name, metadata in manifest.items():
-        if (
-            not isinstance(name, str)
-            or not name.startswith("resume.")
-            or not isinstance(metadata, dict)
-            or "key" not in metadata
-        ):
-            continue
-        try:
-            payload = infrastructure.storage.get_bytes(str(metadata["key"]))
-            loaded_bytes += len(payload)
-            if loaded_bytes > infrastructure.settings.max_job_cache_bytes:
-                break
-            expected_sha256 = metadata.get("sha256")
-            if (
-                metadata.get("schema") != "ndarray-npy-v1"
-                or not isinstance(expected_sha256, str)
-                or not hmac.compare_digest(hashlib.sha256(payload).hexdigest(), expected_sha256)
-            ):
-                continue
-            value = np.asarray(np.load(io.BytesIO(payload), allow_pickle=False), dtype=np.float32)
-            expected_shape = metadata.get("shape")
-            if isinstance(expected_shape, list) and list(value.shape) != expected_shape:
-                continue
-            loaded[name] = value
-        except Exception:
-            continue
-    return loaded
-
-
-def _load_eye_asset(
-    infrastructure: WorkerInfrastructure,
-    key: str,
-) -> EyeHighlightAsset | None:
     try:
-        with np.load(
-            io.BytesIO(infrastructure.storage.get_bytes(key)), allow_pickle=False
-        ) as archive:
-            return EyeHighlightAsset(
-                foreground_rgb=np.asarray(archive["foreground_rgb"], dtype=np.float32),
-                alpha=np.asarray(archive["alpha"], dtype=np.float32),
-                center=(float(archive["center"][0]), float(archive["center"][1])),
-                iris_radius=float(archive["iris_radius"]),
-                angle_radians=float(archive["angle_radians"]),
-                confidence=float(archive["confidence"]),
-                version=str(archive["version"]),
-            )
-    except (KeyError, OSError, ValueError):
-        return None
+        style_strength = float(job_settings.get("style_strength", 0.75))
+        structure_strength = float(job_settings.get("structure_strength", 0.9))
+        inference_steps = int(job_settings.get("inference_steps", 30))
+        random_seed = int(job_settings.get("random_seed", 0))
+    except (TypeError, ValueError) as exc:
+        raise InputValidationError("AI transfer settings are invalid") from exc
+    if not 0.0 <= style_strength <= 1.0:
+        raise InputValidationError("style_strength must be in [0, 1]")
+    if not 0.0 <= structure_strength <= 1.0:
+        raise InputValidationError("structure_strength must be in [0, 1]")
+    if not 10 <= inference_steps <= 50:
+        raise InputValidationError("inference_steps must be in [10, 50]")
+    if not 0 <= random_seed <= 2**31 - 1:
+        raise InputValidationError("random_seed must be in [0, 2^31 - 1]")
+
+    return {
+        "algorithm_profile": AI_ENGINE_ID,
+        "style_strength": style_strength,
+        "structure_strength": structure_strength,
+        "inference_steps": inference_steps,
+        "random_seed": random_seed,
+        "background_mode": background_mode,
+        "background_color": background_color,
+    }
 
 
-def _load_style_eye_assets(
-    infrastructure: WorkerInfrastructure,
-    style_id: uuid.UUID,
-    example_id: uuid.UUID,
-) -> tuple[EyeHighlightAsset | None, EyeHighlightAsset | None] | None:
-    prefix = f"styles/{style_id}/examples/{example_id}"
-    assets = (
-        _load_eye_asset(infrastructure, f"{prefix}/eye-left.npz"),
-        _load_eye_asset(infrastructure, f"{prefix}/eye-right.npz"),
+def _engine_request_settings(settings: dict[str, object]) -> dict[str, object]:
+    """Return only fields accepted by the isolated inference service."""
+
+    return {
+        key: settings[key]
+        for key in (
+            "algorithm_profile",
+            "style_strength",
+            "structure_strength",
+            "inference_steps",
+            "random_seed",
+        )
+    }
+
+
+def _preflight_thresholds(image: NDArray[np.float32]) -> PreflightThresholds:
+    minimum_eye_distance = min(150.0, max(24.0, min(image.shape[:2]) * 0.15))
+    return PreflightThresholds(min_inter_eye_distance=minimum_eye_distance)
+
+
+def _normalized_landmarks(analysis: PortraitAnalysis) -> NDArray[np.float32]:
+    left_eye, right_eye = eye_centers(analysis.landmarks)
+    midpoint = (left_eye + right_eye) * 0.5
+    scale = float(np.linalg.norm(right_eye - left_eye))
+    if not np.isfinite(scale) or scale < 1e-6:
+        raise ValueError("invalid inter-eye scale")
+    return np.asarray((analysis.landmarks - midpoint) / scale, dtype=np.float32)
+
+
+def _geometry_quality(
+    source: PortraitAnalysis,
+    generated_rgb: NDArray[np.float32],
+    analyzer: PortraitAnalyzer,
+) -> tuple[bool, dict[str, object]]:
+    try:
+        generated = analyze_portrait(
+            generated_rgb,
+            analyzer,
+            _preflight_thresholds(generated_rgb),
+        )
+        source_landmarks = _normalized_landmarks(source)
+        generated_landmarks = _normalized_landmarks(generated)
+        if source_landmarks.shape != generated_landmarks.shape:
+            raise ValueError("landmark shape changed")
+        point_drift = np.linalg.norm(source_landmarks - generated_landmarks, axis=1)
+        landmark_drift = float(np.mean(point_drift))
+        landmark_drift_p95 = float(np.percentile(point_drift, 95))
+        pose_components = {
+            "yaw": abs(float(generated.pose.yaw - source.pose.yaw)),
+            "pitch": abs(float(generated.pose.pitch - source.pose.pitch)),
+            "roll": abs(float(generated.pose.roll - source.pose.roll)),
+        }
+        pose_drift = max(pose_components.values())
+        passed = landmark_drift <= 0.08 and pose_drift <= 5.0
+        return passed, {
+            "passed": passed,
+            "landmark_drift_mean": landmark_drift,
+            "landmark_drift_p95": landmark_drift_p95,
+            "pose_drift_degrees": pose_drift,
+            "pose_components_degrees": pose_components,
+        }
+    except (PortraitTransferError, ValueError) as exc:
+        return False, {
+            "passed": False,
+            "reason": "generated_face_analysis_failed",
+            "failure_code": getattr(getattr(exc, "code", None), "value", None),
+        }
+
+
+def _composite_ai_background(
+    generated_rgb: NDArray[np.float32],
+    source_rgb: NDArray[np.float32],
+    source_analysis: PortraitAnalysis,
+    settings: dict[str, object],
+) -> NDArray[np.float32]:
+    mode = str(settings["background_mode"])
+    if mode == "REFERENCE":
+        return np.asarray(generated_rgb, dtype=np.float32).copy()
+    if mode == "KEEP":
+        background = source_rgb
+    elif mode == "BLUR":
+        from PIL import Image, ImageFilter
+
+        source_u8 = np.rint(np.clip(source_rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+        blurred = Image.fromarray(source_u8, mode="RGB").filter(
+            ImageFilter.GaussianBlur(radius=12.0)
+        )
+        background = np.asarray(blurred, dtype=np.float32) / 255.0
+    elif mode == "SOLID":
+        color = _hex_color(cast(str | None, settings["background_color"]))
+        if color is None:
+            raise InputValidationError("A solid background color is required")
+        background = np.broadcast_to(np.asarray(color, dtype=np.float32), source_rgb.shape)
+    else:  # _ai_settings validates this before any model work starts.
+        raise InputValidationError("Unsupported background mode")
+    matte = np.clip(source_analysis.masks.foreground_alpha, 0.0, 1.0)[..., None]
+    return np.asarray(
+        np.clip(generated_rgb * matte + background * (1.0 - matte), 0.0, 1.0),
+        dtype=np.float32,
     )
-    return assets if any(asset is not None for asset in assets) else None
 
 
 def _select_reference(
     infrastructure: WorkerInfrastructure,
     job_id: uuid.UUID,
     query_feature: StyleFeature | None,
-) -> tuple[Asset, tuple[EyeHighlightAsset | None, EyeHighlightAsset | None] | None]:
+) -> Asset:
     with infrastructure.session_factory.begin() as db:
         job = JobRepository(db).get_for_worker(job_id, for_update=True)
         if job is None:
             raise ProcessingCancelled()
         if job.reference_asset is not None:
-            return job.reference_asset, None
+            return job.reference_asset
         if job.style is None:
             raise StyleSelectionFailure("No reference or style is available")
         examples = [
@@ -406,15 +338,12 @@ def _select_reference(
         }
         job.diagnostics = diagnostics
         db.flush()
-        eye_assets = _load_style_eye_assets(
-            infrastructure,
-            selected.style_id,
-            selected.id,
-        )
-        return selected.asset, eye_assets
+        return selected.asset
 
 
 def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, AIEngineError):
+        return exc.retryable
     if isinstance(exc, (BotoCoreError, OperationalError, RedisConnectionError, RedisTimeoutError)):
         return True
     if isinstance(exc, ClientError):
@@ -523,18 +452,24 @@ def process_transfer_job(self: Task, job_id: str) -> None:
             if reporter.cancel_requested():
                 raise ProcessingCancelled()
             reporter.emit(ProcessingStage.DECODING, 3, "Decoding input portrait")
-            input_decoded = decode_image(infrastructure.storage.get_bytes(input_asset.object_key))
+            input_bytes = infrastructure.storage.get_bytes(input_asset.object_key)
+            upload_limits = _decode_limits(
+                infrastructure.settings,
+                max_encoded_bytes=int(infrastructure.settings.max_upload_bytes),
+            )
+            input_decoded = decode_image(input_bytes, upload_limits)
 
-            settings = _core_settings(job_settings, persisted_corrections)
+            ai_settings = _ai_settings(job_settings, persisted_corrections)
             portrait_analyzer = build_portrait_analyzer(infrastructure.settings)
+            reporter.emit(ProcessingStage.FACE_LANDMARKS, 5, "Analyzing source portrait")
+            input_analysis = analyze_portrait(
+                input_decoded.rgb,
+                portrait_analyzer,
+                _preflight_thresholds(input_decoded.rgb),
+            )
             query_feature: StyleFeature | None = None
             if uses_style:
-                reporter.emit(ProcessingStage.REFERENCE_SELECTION, 5, "Selecting reference example")
-                input_analysis = analyze_portrait(
-                    input_decoded.rgb,
-                    portrait_analyzer,
-                    settings.preflight,
-                )
+                reporter.emit(ProcessingStage.REFERENCE_SELECTION, 8, "Selecting reference example")
                 query_feature = build_style_feature(
                     "input",
                     input_decoded.rgb,
@@ -543,53 +478,127 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                     landmarks=input_analysis.landmarks,
                     mask_quality=input_analysis.quality.mask_confidence,
                 )
-            reference_asset, indexed_eye_assets = _select_reference(
-                infrastructure, parsed_job_id, query_feature
-            )
-            reference_decoded = decode_image(
-                infrastructure.storage.get_bytes(reference_asset.object_key)
+            reference_asset = _select_reference(infrastructure, parsed_job_id, query_feature)
+            reference_bytes = infrastructure.storage.get_bytes(reference_asset.object_key)
+            reference_decoded = decode_image(reference_bytes, upload_limits)
+            reporter.emit(ProcessingStage.QUALITY_ANALYSIS, 10, "Validating style portrait")
+            analyze_portrait(
+                reference_decoded.rgb,
+                portrait_analyzer,
+                _preflight_thresholds(reference_decoded.rgb),
             )
             if reporter.cancel_requested():
                 raise ProcessingCancelled()
 
-            base_runtime = create_default_runtime(enable_cpu_dense=settings.dense_alignment)
-            runtime_corrections: dict[str, Any] = {
-                "operations": _translate_corrections(persisted_corrections)
-            }
-            requested_resume_stage = _requested_resume_stage(existing_diagnostics)
-            if requested_resume_stage is not None:
-                runtime_corrections["resume_from_stage"] = requested_resume_stage
-            runtime = replace(
-                base_runtime,
-                analyzer=portrait_analyzer,
-                dense_backend=build_dense_backend(
-                    infrastructure.settings, enabled=settings.dense_alignment
-                ),
-                progress_callback=reporter.package_callback,
-                cancel_check=reporter.cancel_requested,
-                eye_assets=indexed_eye_assets,
-                corrections=runtime_corrections,
-                resume_artifacts=_load_resume_artifacts(infrastructure, existing_diagnostics),
+            reporter.emit(
+                ProcessingStage.MULTISCALE_TRANSFER,
+                15,
+                "Generating portrait with the AI style engine",
             )
-            result = transfer_portrait_style(
+            client = get_ai_engine_client(infrastructure.settings)
+            request_settings = _engine_request_settings(ai_settings)
+            engine_response: AIEngineResponse | None = None
+            generated_rgb: NDArray[np.float32] | None = None
+            quality_attempts: list[dict[str, object]] = []
+            for quality_attempt in range(2):
+                response = client.transfer(
+                    # Preserve the bounded upload representation. Re-encoding a valid
+                    # Re-encoding a valid compressed upload as PNG can expand it
+                    # beyond the internal request cap.
+                    content=input_bytes,
+                    style=reference_bytes,
+                    settings=request_settings,
+                )
+                if reporter.cancel_requested():
+                    raise ProcessingCancelled()
+                output_decoded = decode_image(
+                    response.image_png,
+                    _decode_limits(
+                        infrastructure.settings,
+                        max_encoded_bytes=_AI_RESPONSE_MAX_ENCODED_BYTES,
+                    ),
+                )
+                if output_decoded.rgb.shape != input_decoded.rgb.shape:
+                    raise AIEngineError(
+                        "AI_ENGINE_INVALID_RESPONSE",
+                        "The AI engine changed the portrait dimensions.",
+                        retryable=False,
+                    )
+                reporter.emit(
+                    ProcessingStage.POSTPROCESSING,
+                    75 if quality_attempt == 0 else 92,
+                    "Validating AI output geometry",
+                )
+                passed, quality = _geometry_quality(
+                    input_analysis,
+                    output_decoded.rgb,
+                    portrait_analyzer,
+                )
+                quality_attempts.append(
+                    {
+                        "attempt": quality_attempt + 1,
+                        "style_strength": _bounded_diagnostic_strength(
+                            response.diagnostics.get("style_strength_applied"),
+                            request_settings["style_strength"],
+                        ),
+                        "structure_strength": _bounded_diagnostic_strength(
+                            response.diagnostics.get("structure_strength_applied"),
+                            request_settings["structure_strength"],
+                        ),
+                        **quality,
+                    }
+                )
+                if passed:
+                    engine_response = response
+                    generated_rgb = output_decoded.rgb
+                    break
+                if quality_attempt == 0:
+                    request_settings = {
+                        **request_settings,
+                        "style_strength": min(
+                            float(cast(Any, request_settings["style_strength"])), 0.6
+                        ),
+                        "structure_strength": max(
+                            float(cast(Any, request_settings["structure_strength"])), 0.95
+                        ),
+                    }
+                    reporter.emit(
+                        ProcessingStage.MULTISCALE_TRANSFER,
+                        80,
+                        "Retrying with stronger identity preservation",
+                    )
+            if engine_response is None or generated_rgb is None:
+                raise AIEngineError(
+                    "AI_QUALITY_GUARD_FAILED",
+                    "The generated portrait did not preserve the source face geometry.",
+                    retryable=False,
+                )
+
+            reporter.emit(ProcessingStage.BACKGROUND, 96, "Compositing background")
+            output_rgb = _composite_ai_background(
+                generated_rgb,
                 input_decoded.rgb,
-                reference_decoded.rgb,
-                settings,
-                runtime,
+                input_analysis,
+                ai_settings,
             )
-            if reporter.cancel_requested():
-                raise ProcessingCancelled()
+            result_diagnostics = dict(engine_response.diagnostics)
+            result_diagnostics["worker_quality_guard"] = {
+                "landmark_drift_limit": 0.08,
+                "pose_drift_limit_degrees": 5.0,
+                "retry_performed": len(quality_attempts) > 1,
+                "attempts": quality_attempts,
+            }
 
             reporter.emit(ProcessingStage.UPLOADING_OUTPUT, 99, "Uploading output")
             output_format = str(job_settings.get("output_format", "PNG"))
             if output_format == "JPEG":
                 output_data = encode_jpeg(
-                    result.output_rgb,
+                    output_rgb,
                     quality=int(job_settings.get("jpeg_quality", 95)),
                 )
                 output_mime, extension = "image/jpeg", "jpg"
             else:
-                output_data = encode_png(result.output_rgb)
+                output_data = encode_png(output_rgb)
                 output_mime, extension = "image/png", "png"
             output_key = f"outputs/{job_id}/attempt-{attempt}.{extension}"
             infrastructure.storage.put_bytes(output_key, output_data, output_mime)
@@ -606,85 +615,24 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                 else []
             )
             cache_manifest: dict[str, dict[str, Any]] = {}
-            debug_records: list[tuple[uuid.UUID, str, ArtifactKind, bytes, int, int]] = []
             cache_bytes = 0
-            resume_artifacts = getattr(result, "resume_artifacts", {})
-            if isinstance(resume_artifacts, dict):
-                for name, array in sorted(resume_artifacts.items()):
-                    value = np.asarray(array, dtype=np.float32)
-                    buffer = io.BytesIO()
-                    np.save(buffer, value, allow_pickle=False)
-                    cache_data = buffer.getvalue()
-                    if cache_bytes + len(cache_data) > infrastructure.settings.max_job_cache_bytes:
-                        break
-                    stage = _artifact_stage(str(name))
-                    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(name))[:120]
-                    cache_key = (
-                        f"jobs/{job_id}/cache/attempt-{attempt}/"
-                        f"{stage.value.lower()}/{safe_name}.npy"
-                    )
-                    infrastructure.storage.put_bytes(
-                        cache_key, cache_data, "application/octet-stream"
-                    )
-                    uploaded_keys.append(cache_key)
-                    cache_bytes += len(cache_data)
-                    cache_manifest[str(name)] = {
-                        "key": cache_key,
-                        "stage": stage.value,
-                        "shape": list(value.shape),
-                        "bytes": len(cache_data),
-                        "sha256": hashlib.sha256(cache_data).hexdigest(),
-                        "schema": "ndarray-npy-v1",
-                    }
-            if settings.debug_artifacts:
-                for index, (name, array) in enumerate(sorted(result.artifacts.items())):
-                    if index >= infrastructure.settings.max_debug_artifacts:
-                        break
-                    buffer = io.BytesIO()
-                    np.save(buffer, np.asarray(array, dtype=np.float32), allow_pickle=False)
-                    cache_data = buffer.getvalue()
-                    stage = _artifact_stage(name)
-                    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)[:120]
-                    if (
-                        name not in cache_manifest
-                        and cache_bytes + len(cache_data)
-                        <= infrastructure.settings.max_job_cache_bytes
-                    ):
-                        cache_key = (
-                            f"jobs/{job_id}/cache/attempt-{attempt}/"
-                            f"{stage.value.lower()}/{safe_name}.npy"
-                        )
-                        infrastructure.storage.put_bytes(
-                            cache_key, cache_data, "application/octet-stream"
-                        )
-                        uploaded_keys.append(cache_key)
-                        cache_bytes += len(cache_data)
-                        cache_manifest[name] = {
-                            "key": cache_key,
-                            "stage": stage.value,
-                            "shape": list(array.shape),
-                            "bytes": len(cache_data),
-                            "sha256": hashlib.sha256(cache_data).hexdigest(),
-                            "schema": "ndarray-npy-v1",
-                        }
-                    thumbnail, thumbnail_width, thumbnail_height = _thumbnail(array)
-                    debug_records.append(
-                        (
-                            uuid.uuid4(),
-                            safe_name,
-                            _artifact_kind(name),
-                            thumbnail,
-                            thumbnail_width,
-                            thumbnail_height,
-                        )
-                    )
-
-            diagnostics_data = _jsonable(result.diagnostics)
+            diagnostics_data = _jsonable(result_diagnostics)
             summary = {
-                "profile": diagnostics_data.get("profile"),
+                "engine": engine_response.engine_id,
                 "warnings": diagnostics_data.get("warnings", []),
-                "compatibility_score": diagnostics_data.get("compatibility", {}).get("score"),
-                "alignment_stage": diagnostics_data.get("alignment", {}).get("selected_stage"),
+                "requested_style_strength": ai_settings["style_strength"],
+                "requested_structure_strength": ai_settings["structure_strength"],
+                "effective_style_strength": _bounded_diagnostic_strength(
+                    diagnostics_data.get("style_strength_applied"),
+                    request_settings["style_strength"],
+                ),
+                "effective_structure_strength": _bounded_diagnostic_strength(
+                    diagnostics_data.get("structure_strength_applied"),
+                    request_settings["structure_strength"],
+                ),
+                "requested_inference_steps": ai_settings["inference_steps"],
+                "random_seed": ai_settings["random_seed"],
+                "quality_retry_performed": len(quality_attempts) > 1,
                 "analysis_backend": type(portrait_analyzer).__name__,
             }
             with infrastructure.session_factory.begin() as db:
@@ -697,39 +645,14 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                     kind=AssetKind.OUTPUT,
                     object_key=output_key,
                     mime_type=output_mime,
-                    width=int(result.output_rgb.shape[1]),
-                    height=int(result.output_rgb.shape[0]),
+                    width=int(output_rgb.shape[1]),
+                    height=int(output_rgb.shape[0]),
                     byte_size=len(output_data),
                     sha256=hashlib.sha256(output_data).hexdigest(),
                     metadata={"job_id": str(job.id), "metadata_stripped": True},
                     expires_at=job.expires_at,
                 )
                 repository.add_artifact(job.id, output_asset.id, ArtifactKind.OUTPUT)
-                for (
-                    asset_id,
-                    name,
-                    artifact_kind,
-                    thumbnail,
-                    thumbnail_width,
-                    thumbnail_height,
-                ) in debug_records:
-                    debug_key = f"jobs/{job_id}/debug/attempt-{attempt}/{asset_id}.png"
-                    infrastructure.storage.put_bytes(debug_key, thumbnail, "image/png")
-                    uploaded_keys.append(debug_key)
-                    debug_asset = AssetRepository(db).create(
-                        asset_id=asset_id,
-                        session_id=cast(uuid.UUID, job.session_id),
-                        kind=AssetKind.DEBUG,
-                        object_key=debug_key,
-                        mime_type="image/png",
-                        width=thumbnail_width,
-                        height=thumbnail_height,
-                        byte_size=len(thumbnail),
-                        sha256=hashlib.sha256(thumbnail).hexdigest(),
-                        metadata={"diagnostic_name": name},
-                        expires_at=job.expires_at,
-                    )
-                    repository.add_artifact(job.id, debug_asset.id, artifact_kind)
                 final_diagnostics = dict(job.diagnostics or {})
                 final_diagnostics.update(
                     {
@@ -775,6 +698,38 @@ def process_transfer_job(self: Task, job_id: str) -> None:
     except JobLeaseLost:
         # The current worker must not mutate state now owned by another lease holder.
         return
+    except AIEngineError as exc:
+        if exc.retryable and self.request.retries < self.max_retries:
+            with infrastructure.session_factory.begin() as db:
+                repository = JobRepository(db)
+                job = repository.get_for_worker(parsed_job_id, for_update=True)
+                if job is not None:
+                    repository.mark_retry_queued(
+                        job,
+                        safe_message=(
+                            "The AI engine is temporarily unavailable; the job will retry."
+                        ),
+                    )
+            try:
+                raise self.retry(
+                    exc=exc,
+                    countdown=min(60, 2 ** (self.request.retries + 1)),
+                    max_retries=3,
+                ) from exc
+            except MaxRetriesExceededError:
+                _mark_failed(
+                    infrastructure,
+                    parsed_job_id,
+                    code=exc.code,
+                    safe_message=exc.safe_message,
+                )
+                return
+        _mark_failed(
+            infrastructure,
+            parsed_job_id,
+            code=exc.code,
+            safe_message=exc.safe_message,
+        )
     except PortraitTransferError as exc:
         code = getattr(exc.code, "value", str(exc.code))
         _mark_failed(infrastructure, parsed_job_id, code=code, safe_message=str(exc))
@@ -943,7 +898,11 @@ def index_style(self: Task, style_id: str) -> None:
                         continue
                     try:
                         decoded = decode_image(
-                            infrastructure.storage.get_bytes(example.asset.object_key)
+                            infrastructure.storage.get_bytes(example.asset.object_key),
+                            _decode_limits(
+                                infrastructure.settings,
+                                max_encoded_bytes=int(infrastructure.settings.max_upload_bytes),
+                            ),
                         )
                         ingested = ingest_style(str(example.id), decoded.rgb, analyzer)
                         old_key = example.feature_object_key

@@ -193,6 +193,12 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .segmented-control button.is-active { background: var(--paper); color: var(--ink); }
 .color-field { margin-top: 8px; font-size: 10px; display: flex; align-items: center; justify-content: space-between; }
 .color-field input { width: 28px; height: 28px; border: 0; background: transparent; padding: 0; }
+.number-field { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.1); }
+.number-field > span, .number-field strong, .number-field small { display: block; }
+.number-field strong { font-size: 11px; }
+.number-field small { color: rgba(255,255,255,.5); font-size: 9px; margin-top: 2px; }
+.number-field input { width: 112px; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; background: rgba(255,255,255,.08); color: inherit; padding: 7px 8px; font: inherit; font-variant-numeric: tabular-nums; }
+.number-field input:focus-visible { outline: 3px solid var(--acid); outline-offset: 1px; }
 .toggle-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid rgba(255,255,255,.1); }
 .toggle-row strong, .toggle-row span { display: block; }
 .toggle-row strong { font-size: 11px; }
@@ -257,6 +263,7 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .result-card__heading { display: flex; justify-content: space-between; align-items: end; margin: 1px 3px 18px; }
 .result-card__heading h2 { margin: 5px 0 0; font-family: var(--font-display); font-size: 38px; line-height: 1; font-weight: 400; }
 .result-status { font-size: 9px; text-transform: uppercase; font-weight: 800; letter-spacing: .08em; color: var(--muted); }
+.result-disclosure { margin: -6px 3px 16px; max-width: 760px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .comparison-stage { --portrait-zoom: 1; position: relative; height: min(68vh, 720px); min-height: 440px; overflow: hidden; border-radius: 18px; background: #d7d4ce; }
 .comparison-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transform: scale(var(--portrait-zoom)); transition: transform .2s; }
 .comparison-stage__after { position: absolute; inset: 0; overflow: hidden; }

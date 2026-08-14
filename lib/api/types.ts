@@ -34,7 +34,7 @@ export interface AssetRecord {
 }
 
 export type TransferSettings = Omit<ApiSchemas["TransferSettingsRequest"], "algorithm_profile" | "background_color"> & {
-  algorithm_profile: "paper_exact";
+  algorithm_profile: "ai_dgpst_v1";
   background_color: string | null;
 };
 
@@ -60,6 +60,7 @@ export interface JobDiagnosticsRecord {
 export interface JobRecord {
   id: string;
   status: JobStatus;
+  algorithm_profile: ApiSchemas["AlgorithmProfile"];
   stage: string;
   progress: number;
   input_asset_id: string;

@@ -41,6 +41,7 @@ class ProcessingStage(StrEnum):
 
 
 class AlgorithmProfile(StrEnum):
+    AI_DGPST_V1 = "ai_dgpst_v1"
     PAPER_EXACT = "paper_exact"
     SOURCE_2014_COMPAT = "source_2014_compat"
 

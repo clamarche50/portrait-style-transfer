@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
 import { deleteJob, getJob, getJobDownloadUrl, rerunJob } from "@/lib/api/client";
 import type { JobRecord } from "@/lib/api/types";
 import { CorrectionStudio } from "@/components/editor/CorrectionStudio";
@@ -12,16 +11,17 @@ import { PortraitComparison } from "@/components/editor/PortraitComparison";
 import { ProgressTimeline } from "@/components/editor/ProgressTimeline";
 
 export function JobWorkspace({ jobId }: { jobId: string }) {
+  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["job", jobId], queryFn: () => getJob(jobId), refetchInterval: (result) => ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(result.state.data?.status ?? "") ? 2_000 : false });
-  const [override, setOverride] = useState<JobRecord | null>(null);
-  const job = override ?? query.data;
+  const job = query.data;
 
   async function download() {
     const signed = await getJobDownloadUrl(jobId);
     window.location.assign(signed.url);
   }
 
-  async function retry() { setOverride(await rerunJob(jobId)); }
+  function replaceJob(nextJob: JobRecord) { queryClient.setQueryData(["job", jobId], nextJob); }
+  async function retry() { replaceJob(await rerunJob(jobId)); }
   async function remove() { if (window.confirm("Permanently delete this job and every related image?")) { await deleteJob(jobId); window.location.assign("/"); } }
 
   if (query.isLoading) return <main id="main-content" className="page-container"><div className="loading-state"><span /> Loading private job…</div></main>;
@@ -34,7 +34,9 @@ export function JobWorkspace({ jobId }: { jobId: string }) {
       <ProgressTimeline job={job} />
       {job.status === "SUCCEEDED" && job.input_preview_url && job.output_url && <PortraitComparison job={job} inputUrl={job.input_preview_url} outputUrl={job.output_url} onDownload={download} onRetry={retry} onDelete={remove} />}
       <DiagnosticsPanel job={job} />
-      {job.status === "SUCCEEDED" && <CorrectionStudio job={job} previewUrl={job.output_url} onRerun={setOverride} />}
+      {job.status === "SUCCEEDED" && job.algorithm_profile !== "ai_dgpst_v1" && (
+        <CorrectionStudio job={job} previewUrl={job.output_url} onRerun={replaceJob} />
+      )}
     </main>
   );
 }

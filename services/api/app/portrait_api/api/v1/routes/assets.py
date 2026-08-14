@@ -17,6 +17,7 @@ from portrait_api.metrics import STORAGE_ERRORS, UPLOAD_BYTES, VALIDATION_ERRORS
 from portrait_api.models import Asset, AssetKind, StyleExample
 from portrait_api.repositories import AssetRepository
 from portrait_api.schemas.assets import AssetResponse, DownloadUrlResponse
+from portrait_api.security import DownloadTokenSigner
 from portrait_api.services.image_validation import ImageNormalizer
 from portrait_api.services.storage import ObjectStorage
 from portrait_api.time import is_expired
@@ -165,8 +166,20 @@ def asset_content(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
     storage: ObjectStorage = Depends(get_storage),
+    settings: Settings = Depends(get_settings_from_app),
 ) -> Response:
     asset = _visible_asset(db, principal, asset_id)
+    signer = DownloadTokenSigner(settings)
+    if download and not signer.valid(
+        request.cookies.get(settings.download_cookie_name),
+        asset.id,
+        principal.session_id,
+    ):
+        raise AppError(
+            "DOWNLOAD_LINK_INVALID",
+            "The download link is invalid or has expired.",
+            403,
+        )
     try:
         payload = storage.get_bytes(asset.object_key)
     except Exception as exc:
@@ -184,7 +197,7 @@ def asset_content(
         asset.mime_type, "bin"
     )
     disposition = "attachment" if download else "inline"
-    return Response(
+    response = Response(
         content=payload,
         media_type=asset.mime_type,
         headers={
@@ -192,6 +205,16 @@ def asset_content(
             "Content-Length": str(len(payload)),
         },
     )
+    if download:
+        response.delete_cookie(
+            settings.download_cookie_name,
+            domain=settings.cookie_domain,
+            path=signer.cookie_path(asset.id),
+            secure=settings.cookie_secure,
+            httponly=True,
+            samesite="strict",
+        )
+    return response
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -242,11 +265,13 @@ def delete_asset(
 @router.post("/{asset_id}/download-url", response_model=DownloadUrlResponse)
 def asset_download_url(
     asset_id: uuid.UUID,
+    response: Response,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
     settings: Settings = Depends(get_settings_from_app),
 ) -> DownloadUrlResponse:
     asset = _owned_asset(db, principal, asset_id)
+    DownloadTokenSigner(settings).set_cookie(response, asset.id, principal.session_id)
     return DownloadUrlResponse(
         url=asset_content_url(settings, asset.id, download=True),
         expires_in_seconds=settings.signed_url_ttl_seconds,

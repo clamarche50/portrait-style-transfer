@@ -18,24 +18,18 @@ from pydantic import Field, model_validator
 
 
 class TransferSettingsRequest(ApiModel):
-    algorithm_profile: AlgorithmProfile = AlgorithmProfile.PAPER_EXACT
-    transfer_strength: float = Field(default=1.0, ge=0.0, le=1.0)
-    residual_strength: float = Field(default=1.0, ge=0.0, le=1.0)
-    global_range_mix: float = Field(default=0.25, ge=0.0, le=1.0)
-    eye_highlights: bool = True
+    algorithm_profile: Literal[AlgorithmProfile.AI_DGPST_V1] = AlgorithmProfile.AI_DGPST_V1
+    style_strength: float = Field(default=0.75, ge=0.0, le=1.0)
+    structure_strength: float = Field(default=0.9, ge=0.0, le=1.0)
+    inference_steps: int = Field(default=30, ge=10, le=50)
+    random_seed: int = Field(default=0, ge=0, le=2**31 - 1)
     background_mode: BackgroundMode = BackgroundMode.KEEP
     background_color: str | None = None
-    dense_alignment: bool = True
-    processing_long_edge: int = Field(default=1280, ge=512, le=2048)
     output_format: OutputFormat = OutputFormat.PNG
     jpeg_quality: int = Field(default=95, ge=70, le=100)
-    debug_artifacts: bool = False
-    random_seed: int = Field(default=0, ge=0, le=2**31 - 1)
 
     @model_validator(mode="after")
     def validate_background(self) -> TransferSettingsRequest:
-        if self.algorithm_profile != AlgorithmProfile.PAPER_EXACT:
-            raise ValueError("Only the paper_exact profile is available through the public API")
         if self.background_mode == BackgroundMode.SOLID:
             if not self.background_color or not re.fullmatch(
                 r"#[0-9a-fA-F]{6}", self.background_color

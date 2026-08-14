@@ -35,7 +35,7 @@ export function DiagnosticsPanel({ job }: { job: JobRecord }) {
   return (
     <details className="diagnostics-card">
       <summary>
-        <span><Activity size={18} aria-hidden="true" /><span><strong>Processing diagnostics</strong><small>Alignment, masks, energy, and fallbacks</small></span></span>
+        <span><Activity size={18} aria-hidden="true" /><span><strong>Processing diagnostics</strong><small>AI inference, structure, output checks, and fallbacks</small></span></span>
         <span className="diagnostic-count">{artifacts.length} artifacts</span>
         <ChevronDown size={18} aria-hidden="true" />
       </summary>
@@ -60,7 +60,7 @@ export function DiagnosticsPanel({ job }: { job: JobRecord }) {
               </figure>
             ))}
           </div>
-        ) : <p className="empty-copy">Enable “Save diagnostics” before a run to retain private intermediate previews. They expire with the job.</p>}
+        ) : <p className="empty-copy">This AI run did not retain intermediate image previews. Structured inference and quality diagnostics appear below.</p>}
         {query.isError && <p className="inline-error" role="alert">Private diagnostics could not be loaded.</p>}
         {diagnostics && <pre className="diagnostic-json">{JSON.stringify(diagnostics, null, 2)}</pre>}
       </div>

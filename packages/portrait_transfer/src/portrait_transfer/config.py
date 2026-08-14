@@ -32,7 +32,7 @@ SOURCE_ENERGY_SIGMAS: Final[tuple[float, ...]] = (8.0, 16.0, 32.0, 64.0, 128.0)
 @dataclass(frozen=True)
 class ImageLimits:
     max_encoded_bytes: int = 15 * 1024 * 1024
-    max_decoded_pixels: int = 25_000_000
+    max_decoded_pixels: int = 8_000_000
     max_original_long_edge: int = 8_000
     allowed_formats: tuple[str, ...] = ("JPEG", "PNG", "WEBP")
 

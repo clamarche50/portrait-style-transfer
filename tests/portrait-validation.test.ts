@@ -19,12 +19,18 @@ describe("portrait file validation", () => {
 });
 
 describe("transfer settings", () => {
-  it("uses the paper-exact public profile", () => {
-    expect(settingsSchema.parse(defaultSettings).algorithm_profile).toBe("paper_exact");
+  it("uses the versioned DGPST AI profile", () => {
+    expect(settingsSchema.parse(defaultSettings).algorithm_profile).toBe("ai_dgpst_v1");
   });
 
-  it("rejects unsafe gain strength", () => {
-    expect(() => settingsSchema.parse({ ...defaultSettings, transfer_strength: 2 })).toThrow();
+  it("rejects out-of-range AI controls", () => {
+    expect(() => settingsSchema.parse({ ...defaultSettings, style_strength: 2 })).toThrow();
+    expect(() => settingsSchema.parse({ ...defaultSettings, structure_strength: -0.1 })).toThrow();
+    expect(() => settingsSchema.parse({ ...defaultSettings, inference_steps: 9 })).toThrow();
+  });
+
+  it("rejects removed classical-engine settings", () => {
+    expect(() => settingsSchema.parse({ ...defaultSettings, dense_alignment: true })).toThrow();
   });
 
   it("keeps background color payloads consistent with the selected mode", () => {

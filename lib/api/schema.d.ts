@@ -357,7 +357,7 @@ export interface components {
          * AlgorithmProfile
          * @enum {string}
          */
-        AlgorithmProfile: "paper_exact" | "source_2014_compat";
+        AlgorithmProfile: "ai_dgpst_v1" | "paper_exact" | "source_2014_compat";
         /** AlignmentCorrection */
         AlignmentCorrection: {
             /** Input Points */
@@ -791,32 +791,21 @@ export interface components {
         };
         /** TransferSettingsRequest */
         TransferSettingsRequest: {
-            /** @default paper_exact */
-            algorithm_profile: components["schemas"]["AlgorithmProfile"];
+            /**
+             * Algorithm Profile
+             * @default ai_dgpst_v1
+             * @constant
+             */
+            algorithm_profile: "ai_dgpst_v1";
             /** Background Color */
             background_color?: string | null;
             /** @default KEEP */
             background_mode: components["schemas"]["BackgroundMode"];
             /**
-             * Debug Artifacts
-             * @default false
+             * Inference Steps
+             * @default 30
              */
-            debug_artifacts: boolean;
-            /**
-             * Dense Alignment
-             * @default true
-             */
-            dense_alignment: boolean;
-            /**
-             * Eye Highlights
-             * @default true
-             */
-            eye_highlights: boolean;
-            /**
-             * Global Range Mix
-             * @default 0.25
-             */
-            global_range_mix: number;
+            inference_steps: number;
             /**
              * Jpeg Quality
              * @default 95
@@ -825,25 +814,20 @@ export interface components {
             /** @default PNG */
             output_format: components["schemas"]["OutputFormat"];
             /**
-             * Processing Long Edge
-             * @default 1280
-             */
-            processing_long_edge: number;
-            /**
              * Random Seed
              * @default 0
              */
             random_seed: number;
             /**
-             * Residual Strength
-             * @default 1
+             * Structure Strength
+             * @default 0.9
              */
-            residual_strength: number;
+            structure_strength: number;
             /**
-             * Transfer Strength
-             * @default 1
+             * Style Strength
+             * @default 0.75
              */
-            transfer_strength: number;
+            style_strength: number;
         };
         /** UpdateStyleRequest */
         UpdateStyleRequest: {
@@ -971,6 +955,7 @@ export interface operations {
         parameters: {
             query?: {
                 download?: boolean;
+                token?: string | null;
             };
             header?: never;
             path: {

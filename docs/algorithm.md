@@ -1,109 +1,106 @@
 # Algorithm
 
-## Profiles and coordinate convention
+## Production profile
 
-`PAPER_EXACT` is the production default. It implements the paper-specified multiscale equations. `SOURCE_2014_COMPAT` is gated, development-only behavior for understanding the uploaded 2014 archive; it is not presented as a user style or exact published-result reproduction.
+`AI_DGPST_V1` is the only public transfer profile. It integrates the official
+implementation of Wang et al., *Domain Generalizable Portrait Style Transfer*
+(ICCV 2025), pinned to commit
+`aada535bde5b87f9ece9a4af1c0628a93f46a342`. The service applies a small,
+asserted inference-only compatibility patch during the Docker build; every
+replacement must match the pinned source exactly or the build fails.
 
-Every warp is an absolute backward map:
+The former `PAPER_EXACT` and `SOURCE_2014_COMPAT` numerical pipelines remain in
+the repository for historical tests and private comparisons. They are not
+accepted by the public job API and are not silent fallbacks for AI failure.
 
-```text
-M[y, x] = source coordinate sampled to produce destination pixel (x, y)
-```
+## Model composition
 
-Offsets exist only at library boundaries. Reference image fields are derived from original reference coordinates rather than repeatedly resampling intermediate images.
+The inference graph combines:
 
-## Preflight and canonical crop
+- Stable Diffusion v1.5 as the local generative backbone;
+- the official DGPST `CelebA_default` ControlNet and learned checkpoint;
+- the SD1.5 full-face IP-Adapter and its CLIP vision encoder;
+- DGPST's semantic/feature correspondence and wavelet-based networks.
 
-Decoder validation corrects EXIF orientation, converts to sRGB, handles alpha against a neutral background, strips metadata, and enforces encoded/decoded limits. MediaPipe Face Landmarker must find exactly one near-frontal face with both irises and major features in frame. Quality analysis measures facial resolution, blur, exposure, noise, crop truncation, matte confidence, and an occlusion proxy.
+The content upload is the structure image. The reference upload is the texture
+and appearance image. No hosted inference provider, face-recognition API, or
+runtime Hugging Face request is used. The service starts in offline mode and
+loads only `/models/dgpst` after manifest verification.
 
-The input head crop includes hair, ears, chin, and upper shoulders when available, with 35% horizontal, 45% top, and 30% bottom margins. It is reflect-padded when necessary and processed at a configurable long edge, normally 1280. Transforms among original input, canonical crop, and reference coordinates are retained for final composition.
+## Preprocessing and restoration
 
-MediaPipe multiclass segmentation is refined with GrabCut, morphology, connected-component selection, and a soft distance/edge feather. The effective transfer support is input head alpha multiplied by the warped reference head alpha. Unsupported or low-confidence areas preserve the input.
+Both payloads must decode as JPEG, PNG, or WebP and pass encoded-byte, decoded-
+pixel, and minimum-dimension limits. EXIF orientation is applied and input is
+converted to RGB.
 
-## Correspondence
+Each image follows the official DGPST `scale_shortside` policy: its short side
+is scaled toward 512 pixels without changing aspect ratio. Dimensions are
+rounded to model-compatible multiples of 16, and the long side is capped at 768
+pixels by default for the local 12 GiB GPU. There is no square padding or crop.
+The content transform is retained and the generated result is resized back to
+the original content dimensions. `DGPST_MAX_LONG_SIDE` is an explicit
+quality/VRAM control and must remain a multiple of 16 from 512 through 1024.
 
-### Similarity/partial affine
+A post-inference guard rejects:
 
-Eye centers, mouth center, and optionally nose base define a RANSAC transform from reference to input. Reflections, excessive scale/rotation, too few inliers, and high normalized anchor error invalidate the transform.
+- changed output dimensions;
+- non-RGB or non-finite pixels; and
+- a large increase in border anisotropy associated with stretched-edge artifacts.
 
-### Beier-Neely line morph
+The upstream quality fallback based on automatic semantic masks is deliberately
+not enabled. Its referenced ADE20K SegFormer does not provide the required
+19-class face topology, while a known matching face parser is restricted to
+non-commercial research/education. A mask mode must not ship until a correctly
+licensed 19-class parser is pinned, validated, and added to the manifest.
 
-Named landmark curves create directed segment pairs for jaw, brows, nose, eyes, lips, optional forehead/hairline, and the crop boundary. For destination point `X` and destination segment `P'Q'`:
+## User controls
 
-```text
-u = dot(X-P', Q'-P') / ||Q'-P'||²
-v = dot(X-P', perpendicular(Q'-P')) / ||Q'-P'||
-X_i = P + u(Q-P) + v perpendicular(Q-P)/||Q-P||
-weight_i = (length(P'Q')^p / (a + segment_distance))^b
-M_line(X) = sum(weight_i X_i) / sum(weight_i)
-```
+- `style_strength` (`0..1`, default `0.75`) controls interpolation toward reference appearance.
+- `structure_strength` (`0..1`, default `0.90`) controls DGPST ControlNet conditioning.
+- `inference_steps` (`10..50`, default `30`) trades latency for denoising refinement.
+- `random_seed` (`0..2^31-1`) selects the diffusion noise sequence.
 
-Defaults are `a=10`, `b=1`, `p=1`. CPU evaluation is chunked; a scalar implementation serves as the numeric oracle. Zero-length segments, invalid sampling, and foldovers are guarded, with affine fallback.
+The same inputs, model artifacts, settings, and seed are intended to be
+repeatable on the same runtime, but CUDA kernels and dependency changes can
+still produce small differences. Diagnostics record the engine, controls,
+elapsed time, seed, manifest identity, and peak allocated GPU memory.
 
-### Dense descriptor refinement
+## Safety and failure behavior
 
-An ephemeral aligned preview is locally contrast-normalized and optimized at configured coarse-to-fine scales. The CPU path uses a deterministic clean-room dense gradient descriptor and continuous robust residual flow; the optional CUDA path uses Kornia DenseSIFT descriptors. Both paths validate improvement, bounds, and Jacobians. This is a clean-room approximation of the paper's SIFT Flow stage, not the archive's bundled discrete MEX runtime.
+The service eagerly loads and verifies models before becoming ready. Missing,
+truncated, or modified files fail closed. CUDA unavailability, insufficient GPU
+memory, invalid model state, invalid input, and output-quality failures use
+specific error codes. Production never substitutes a test stub or the legacy
+classical engine after an AI error.
 
-The final map composes rather than adds offsets:
+`latest_checkpoint.pth` is verified before loading and is opened with
+`torch.load(..., weights_only=True, mmap=True)`. Other learned weights use
+safetensors. Model files are read-only inside the container.
 
-```text
-M_final(x) = sample(M_affine_line, x + f(x))
-```
+## Known limitations
 
-Validation considers descriptor improvement, valid fraction, low-resolution consistency, displacement percentiles, negative Jacobians, mask overlap, and landmark-edge alignment. Fallback is dense → affine plus line morph → affine → incompatible-pair rejection.
+DGPST is generative. It can change facial details, apparent age, expression,
+hair, glasses, jewelry, background, lighting, or perceived identity. Structure
+conditioning reduces drift but does not prove identity preservation. It can
+also reproduce bias and unsafe tendencies inherited from its training data and
+Stable Diffusion v1.5.
 
-## Lab and full-resolution stack
+The Stable Diffusion safety checker is disabled in the DGPST pipeline, and this
+repository does not yet include an equivalent local input/output moderation
+model. Public release is blocked on explicit acceptable-use/reporting controls
+and a reviewed local moderation strategy; private-network isolation is not
+content-safety enforcement.
 
-Production uses standards-compliant sRGB/D65 CIE Lab in float32. L is internally normalized to `[0,1]`; chroma ranges are explicit in code. Gaussian operations use symmetric boundaries and normalized mask support:
+Outputs must be presented as AI-edited/generated portraits. Do not use them as
+identity evidence, without the depicted person's permission, for deceptive
+impersonation, or to infer factual attributes. Real-quality validation requires
+rights-cleared, diverse portrait pairs; synthetic and stub tests establish only
+software behavior.
 
-```text
-masked_gaussian(X,M,sigma) = G_sigma(X*M) / max(G_sigma(M), 1e-6)
-```
+## Provenance
 
-No spatial downsampling occurs. With `B_s` denoting a masked Gaussian blur:
-
-```text
-L0 = I-B2       L3 = B8-B16
-L1 = B2-B4      L4 = B16-B32
-L2 = B4-B8      L5 = B32-B64
-R  = B64
-```
-
-The six bands plus residual reconstruct the supported input within numeric tolerance.
-
-## Energy and robust gain
-
-For band `l=0..5`, input and reference energy use sigma `2^(l+1)`. Reference energy is computed in reference coordinates and then warped:
-
-```text
-S_l(I) = masked_gaussian(L_l(I)^2, M_input, 2^(l+1))
-S_l(E) = masked_gaussian(L_l(E)^2, M_reference, 2^(l+1))
-g_l = sqrt(warp(S_l(E), M_final) / (S_l(I) + 1e-4))
-g_l = masked_gaussian(clip(g_l, 0.9, 2.8), M_effective, 3*2^l)
-g_effective = exp(strength * log(max(g_l, 1e-6)))
-```
-
-Alignment-confidence protection blends gain toward one, and explicit correction regions can lock, constrain, or copy gain. These protections are switchable extensions around the paper result.
-
-L transfers all six detail bands. Lab a/b preserve input bands 0–2 and transfer bands 3–5. Production behavior never switches on a photographer/style name. A monochrome flag is derived during ingestion and neutralizes chroma intentionally.
-
-The residual is:
-
-```text
-R_out = (1-residual_strength) R_input
-      + residual_strength warp(R_reference, M_final)
-```
-
-After reconstruction, masked empirical-CDF histogram matching can be mixed with the local result; default mix is 0.25. The result is gamut-compressed, confidence-blended toward input, composited through soft alpha, and restored to original resolution.
-
-## Eyes, backgrounds, and ranking
-
-Style ingestion finds suitable iris-local highlights using `k=3` Lab clustering plus component, luminance, compactness, saturation, and confidence tests. Target highlights are conservatively removed/inpainted; source catchlights are pupil-aligned, iris-scaled, optionally rotated, clipped, and alpha-composited in linear light. Low-confidence cases disable automatically.
-
-Background modes keep or blur input, use a solid color, or use an inpainted/crop-matched reference background. Facial reference pixels are never treated as background.
-
-Style examples store six `32×32` L-energy features plus pose, shape, mask, blur, color, edge, and crop metrics. Severe mismatches are filtered. Ranking weights energy NCC 0.65, pose 0.15, landmark shape 0.10, photometric compatibility 0.05, and mask quality 0.05; it returns the top three with components.
-
-## Source-compatible differences
-
-The private profile merges the finest two bands into a five-band stack beginning at sigma 4, computes energy after warping with effective sigmas `[8,16,32,64,128]`, clamps without paper gain smoothing, and can use a legacy color-range utility. These differences are diagnostic, documented, and prohibited as silent production defaults.
+`models/dgpst/manifest.json` is the machine-readable authority for the exact 19
+runtime artifacts. Hugging Face files pin immutable commit revisions. The DGPST
+authors publish their checkpoint through a mutable Google Drive folder, so each
+downloaded artifact is pinned by byte length and SHA-256. See
+`THIRD_PARTY_NOTICES.md` and `docs/licensing-review.md` before redistribution.

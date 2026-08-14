@@ -19,7 +19,7 @@ test("server-renders the product editor with final metadata", async () => {
   const html = await response.text();
   assert.match(html, /<title>Portrait Studio/);
   assert.match(html, /Move the light/);
-  assert.match(html, /Keep the person/);
+  assert.match(html, /Shape the finish/);
   assert.match(html, /Create portrait/);
   assert.match(html, /Nothing uploads until you click Create portrait/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

@@ -8,13 +8,14 @@ interface SettingsPanelProps {
   onChange: (settings: TransferSettings) => void;
 }
 
-function RangeControl({ label, value, min, max, step, hint, onChange }: {
+function RangeControl({ label, value, min, max, step, hint, decimals = 2, onChange }: {
   label: string;
   value: number;
   min: number;
   max: number;
   step: number;
   hint: string;
+  decimals?: number;
   onChange: (value: number) => void;
 }) {
   const percent = ((value - min) / (max - min)) * 100;
@@ -22,10 +23,11 @@ function RangeControl({ label, value, min, max, step, hint, onChange }: {
     <label className="range-control">
       <span className="range-control__label">
         <span>{label} <span className="hint-dot" title={hint}><Info size={13} aria-hidden="true" /></span></span>
-        <output>{value.toFixed(2)}</output>
+        <output>{value.toFixed(decimals)}</output>
       </span>
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
@@ -47,13 +49,38 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
           <span className="eyebrow">03 · Direction</span>
           <h2 id="settings-title">Shape the finish</h2>
         </div>
-        <span className="method-badge"><Sparkles size={14} aria-hidden="true" /> Paper exact</span>
+        <span className="method-badge"><Sparkles size={14} aria-hidden="true" /> DGPST · AI</span>
       </div>
 
       <div className="settings-stack">
-        <RangeControl label="Texture & contrast" value={settings.transfer_strength} min={0} max={1} step={0.05} hint="At 0 the original detail is kept; at 1 the paper-exact gain is applied." onChange={(value) => patch({ transfer_strength: value })} />
-        <RangeControl label="Broad lighting" value={settings.residual_strength} min={0} max={1} step={0.05} hint="Controls how strongly the reference's low-frequency light and color are transferred." onChange={(value) => patch({ residual_strength: value })} />
-        <RangeControl label="Global range" value={settings.global_range_mix} min={0} max={1} step={0.05} hint="Adds mask-aware histogram matching when local transfer alone is too restrained." onChange={(value) => patch({ global_range_mix: value })} />
+        <RangeControl
+          label="Style strength"
+          value={settings.style_strength}
+          min={0}
+          max={1}
+          step={0.05}
+          hint="Controls how strongly the reference portrait's color, lighting, and texture guide the result."
+          onChange={(value) => patch({ style_strength: value })}
+        />
+        <RangeControl
+          label="Identity & structure"
+          value={settings.structure_strength}
+          min={0}
+          max={1}
+          step={0.05}
+          hint="Higher values more strongly preserve the source portrait's pose, expression, and facial geometry."
+          onChange={(value) => patch({ structure_strength: value })}
+        />
+        <RangeControl
+          label="Inference steps"
+          value={settings.inference_steps}
+          min={10}
+          max={50}
+          step={1}
+          decimals={0}
+          hint="More diffusion steps can refine detail but take longer and use the GPU for more time."
+          onChange={(value) => patch({ inference_steps: value })}
+        />
       </div>
 
       <fieldset className="segmented-fieldset">
@@ -70,11 +97,6 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
         )}
       </fieldset>
 
-      <div className="toggle-row">
-        <div><strong>Eye highlights</strong><span>Transfer catchlights when both eyes are reliable.</span></div>
-        <label className="switch"><input type="checkbox" checked={settings.eye_highlights} onChange={(event) => patch({ eye_highlights: event.target.checked })} /><span /></label>
-      </div>
-
       <fieldset className="segmented-fieldset">
         <legend>Output</legend>
         <div className="segmented-control">
@@ -87,14 +109,29 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
       <details className="advanced-settings">
         <summary>Advanced <ChevronDown size={16} aria-hidden="true" /></summary>
         <div>
-          <div className="toggle-row">
-            <div><strong>Dense alignment</strong><span>Slower, but improves contours and fine placement.</span></div>
-            <label className="switch"><input type="checkbox" checked={settings.dense_alignment} onChange={(event) => patch({ dense_alignment: event.target.checked })} /><span /></label>
-          </div>
-          <div className="toggle-row">
-            <div><strong>Save diagnostics</strong><span>Private artifacts expire with the job.</span></div>
-            <label className="switch"><input type="checkbox" checked={settings.debug_artifacts} onChange={(event) => patch({ debug_artifacts: event.target.checked })} /><span /></label>
-          </div>
+          {settings.output_format === "JPEG" && (
+            <RangeControl
+              label="JPEG quality"
+              value={settings.jpeg_quality}
+              min={70}
+              max={100}
+              step={1}
+              decimals={0}
+              hint="Higher quality preserves more detail but creates a larger file."
+              onChange={(value) => patch({ jpeg_quality: value })}
+            />
+          )}
+          <label className="number-field">
+            <span><strong>Random seed</strong><small>Reuse a seed to reproduce the same AI variation.</small></span>
+            <input
+              type="number"
+              min={0}
+              max={2_147_483_647}
+              step={1}
+              value={settings.random_seed}
+              onChange={(event) => patch({ random_seed: Number(event.target.value) })}
+            />
+          </label>
         </div>
       </details>
     </aside>

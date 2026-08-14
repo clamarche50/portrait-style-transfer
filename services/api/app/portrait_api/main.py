@@ -81,7 +81,8 @@ def create_app(
         title="Portrait Style Transfer API",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url=None if settings.app_env == "production" else "/docs",
+        docs_url="/docs" if settings.expose_api_docs else None,
+        openapi_url="/openapi.json" if settings.expose_api_docs else None,
         redoc_url=None,
     )
     app.state.settings = settings
@@ -89,9 +90,11 @@ def create_app(
     install_error_handlers(app)
     app.include_router(api_router)
 
-    @app.get("/metrics", include_in_schema=False)
-    def metrics() -> Response:
-        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    if settings.expose_metrics:
+
+        @app.get("/metrics", include_in_schema=False)
+        def metrics() -> Response:
+            return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     app.add_middleware(RateLimitMiddleware, settings=settings, store=progress_store)
     app.add_middleware(RequestSessionMiddleware, settings=settings)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -16,6 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 _SAFE_HTTP_METHODS = frozenset({"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"})
+_CLOUDFLARE_RAY = re.compile(r"^[0-9a-fA-F]{16,32}-[A-Za-z0-9]{3}$")
 
 
 def _safe_http_method(method: str) -> str:
@@ -27,6 +30,26 @@ def _route_template(request: Request) -> str:
     route = request.scope.get("route")
     template = getattr(route, "path", None)
     return template if isinstance(template, str) and template.startswith("/") else "unmatched"
+
+
+def _rate_limit_client_ip(request: Request) -> str:
+    peer = request.client.host if request.client else "unknown"
+    try:
+        peer_address = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer
+    cloudflare_ip = request.headers.get("CF-Connecting-IP")
+    cloudflare_ray = request.headers.get("CF-Ray", "")
+    if (
+        (peer_address.is_private or peer_address.is_loopback)
+        and cloudflare_ip
+        and _CLOUDFLARE_RAY.fullmatch(cloudflare_ray)
+    ):
+        try:
+            return ipaddress.ip_address(cloudflare_ip).compressed
+        except ValueError:
+            pass
+    return peer_address.compressed
 
 
 def _error(
@@ -165,7 +188,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             limit, window, category = self.settings.rate_limit_jobs_per_hour, 3600, "job"
         else:
             limit, window, category = self.settings.rate_limit_requests_per_minute, 60, "request"
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _rate_limit_client_ip(request)
         try:
             session_allowed, session_retry_after = await self.store.rate_limit(
                 f"{category}:session:{request.state.session_hash}", limit, window
@@ -176,7 +199,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             allowed = session_allowed and ip_allowed
             retry_after = max(session_retry_after, ip_retry_after)
         except Exception:
-            if self.settings.app_env == "production":
+            if self.settings.rate_limit_fail_closed:
                 return _error(
                     request.state.request_id,
                     503,
@@ -223,8 +246,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "default-src 'none'; frame-ancestors 'none'"
             )
         response.headers["Cache-Control"] = response.headers.get("Cache-Control", "no-store")
-        if self.settings.app_env == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Browsers only honor HSTS over a secure connection, so it is safe to
+        # emit at the origin even when TLS terminates at Vercel/Cloudflare.
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
 

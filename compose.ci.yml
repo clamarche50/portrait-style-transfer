@@ -1,0 +1,28 @@
+# CPU-only contract overlay for standard CI runners. Never use this file for a
+# deployment: it replaces real DGPST inference with the explicitly permitted
+# deterministic stub backend.
+services:
+  api:
+    volumes: !reset []
+
+  ai-engine:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.ai-engine-ci
+    environment:
+      DGPST_BACKEND: stub
+      DGPST_ALLOW_STUB_BACKEND: "true"
+      DGPST_VERIFY_MODELS: "false"
+      DGPST_EAGER_LOAD: "true"
+    volumes: !reset []
+    gpus: !reset []
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health/ready', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  worker-cpu:
+    volumes: !reset []

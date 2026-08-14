@@ -33,6 +33,12 @@ jobs:
           grep -Fx 'reference/original-matlab' .dockerignore
           grep -Fx 'reference/original-paper' .dockerignore
           grep -Fx 'clamarche50-temp-*.txt' .dockerignore
+          grep -Fx 'models/dgpst' .dockerignore
+      - name: Reject tracked DGPST model binaries
+        run: |
+          printf '%s\n' models/dgpst/README.md models/dgpst/manifest.json > /tmp/expected-dgpst-files.txt
+          git ls-files 'models/dgpst/*' | sort > /tmp/tracked-dgpst-files.txt
+          diff -u /tmp/expected-dgpst-files.txt /tmp/tracked-dgpst-files.txt
 
   web:
     runs-on: ubuntu-24.04
@@ -64,17 +70,19 @@ jobs:
       - run: uv sync --project services/worker --frozen --all-groups
       - name: Lint and format
         run: |
-          uv run --project services/api ruff check packages/portrait_transfer services/api services/worker scripts
-          uv run --project services/api ruff format --check packages/portrait_transfer services/api services/worker scripts
+          uv run --project services/api ruff check packages/portrait_transfer services/api services/worker services/ai_engine scripts
+          uv run --project services/api ruff format --check packages/portrait_transfer services/api services/worker services/ai_engine scripts
       - name: Type-check each Python import root independently
         run: |
           uv run --project services/api mypy packages/portrait_transfer/src
           uv run --project services/api mypy services/api/app
           uv run --project services/worker mypy services/worker/app
+          uv run --project services/api mypy --ignore-missing-imports services/ai_engine
       - name: Unit and legacy primitive tests
         run: |
           uv run --project packages/portrait_transfer --extra test --with pytest-cov==7.0.0 pytest packages/portrait_transfer/tests --cov=portrait_transfer --cov-report=term-missing
           uv run --project packages/portrait_transfer --extra test pytest packages/portrait_transfer/tests -k "legacy or source"
+          PYTHONPATH=. uv run --project services/api pytest services/ai_engine/tests
 
   integration:
     runs-on: ubuntu-24.04

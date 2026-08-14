@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+.cloudflare-tunnel-token
 node_modules
 .next
 .vinext
@@ -34,6 +35,7 @@ __pycache__
 outputs
 work
 tmp
+.tmp
 *.cookies
 *.cookiejar
 tests/fixtures/private
@@ -50,6 +52,9 @@ models/*.onnx
 models/*.bin
 models/*.pt
 models/*.pth
+# The AI image reads weights from a read-only runtime bind mount; never send
+# multi-gigabyte local checkpoints to BuildKit.
+models/dgpst
 *.mex*
 postgres-data
 redis-data

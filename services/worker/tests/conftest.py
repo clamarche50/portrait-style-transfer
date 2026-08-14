@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import numpy as np
 import pytest
 from PIL import Image
 from portrait_api.config import Settings
@@ -100,7 +101,6 @@ class WorkerHarness:
     def create_job(
         self,
         *,
-        debug_artifacts: bool = False,
         expires_at: datetime | None = None,
     ) -> tuple[str, str, str]:
         session_id = __import__("uuid").uuid4()
@@ -138,20 +138,16 @@ class WorkerHarness:
                 input_asset_id=input_asset.id,
                 reference_asset_id=reference_asset.id,
                 style_id=None,
-                algorithm_profile=AlgorithmProfile.PAPER_EXACT,
+                algorithm_profile=AlgorithmProfile.AI_DGPST_V1,
                 settings={
-                    "algorithm_profile": "paper_exact",
-                    "transfer_strength": 1.0,
-                    "residual_strength": 1.0,
-                    "global_range_mix": 0.25,
-                    "eye_highlights": True,
+                    "algorithm_profile": "ai_dgpst_v1",
+                    "style_strength": 0.75,
+                    "structure_strength": 0.9,
+                    "inference_steps": 30,
                     "background_mode": "KEEP",
                     "background_color": None,
-                    "dense_alignment": False,
-                    "processing_long_edge": 512,
                     "output_format": "PNG",
                     "jpeg_quality": 95,
-                    "debug_artifacts": debug_artifacts,
                     "random_seed": 0,
                 },
                 expires_at=expires,
@@ -196,6 +192,9 @@ def worker(tmp_path: Any) -> Iterator[WorkerHarness]:
 
 
 def portrait_bytes(color: tuple[int, int, int]) -> bytes:
+    yy, xx = np.indices((256, 256))
+    texture = ((((xx // 8) + (yy // 8)) % 2) * 2 - 1)[..., None] * 8
+    pixels = np.clip(np.asarray(color, dtype=np.int16) + texture, 0, 255).astype(np.uint8)
     output = io.BytesIO()
-    Image.new("RGB", (256, 256), color).save(output, "PNG")
+    Image.fromarray(pixels, mode="RGB").save(output, "PNG")
     return output.getvalue()

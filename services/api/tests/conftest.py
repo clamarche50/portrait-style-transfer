@@ -39,6 +39,8 @@ class ApiHarness:
 def api() -> Iterator[ApiHarness]:
     settings = Settings(
         app_env="test",
+        expose_api_docs=True,
+        expose_metrics=True,
         database_url="sqlite+pysqlite://",
         require_models_for_readiness=False,
         initialize_storage_on_startup=False,
