@@ -19,10 +19,8 @@ from portrait_api.models import (
     StyleExample,
 )
 from portrait_api.repositories import AssetRepository, JobRepository, StyleRepository
-from portrait_transfer.exceptions import OptionalDependencyError
 from portrait_worker.ai_client import AIEngineError, AIEngineResponse
 from portrait_worker.cleanup import purge_expired_records
-from portrait_worker.gpu_dense import KorniaGpuDenseCorrespondence, build_dense_backend
 from portrait_worker.mediapipe_adapter import build_portrait_analyzer
 from portrait_worker.tasks import (
     _AI_RESPONSE_MAX_ENCODED_BYTES,
@@ -37,12 +35,12 @@ def _successful_ai_response(content: bytes) -> AIEngineResponse:
     return AIEngineResponse(
         image_png=content,
         diagnostics={
-            "model": "DGPST",
+            "model": "InstantStyle",
             "warnings": ["synthetic_engine"],
             "style_strength_applied": 0.58,
             "structure_strength_applied": 0.97,
         },
-        engine_id="ai_dgpst_v1",
+        engine_id="ai_instantstyle_v1",
     )
 
 
@@ -69,7 +67,7 @@ def test_worker_executes_transfer_and_commits_output(
 
     assert len(calls) == 1
     assert calls[0]["settings"] == {
-        "algorithm_profile": "ai_dgpst_v1",
+        "algorithm_profile": "ai_instantstyle_v1",
         "style_strength": 0.75,
         "structure_strength": 0.9,
         "inference_steps": 30,
@@ -80,7 +78,7 @@ def test_worker_executes_transfer_and_commits_output(
         assert job is not None
         assert job.status == JobStatus.SUCCEEDED
         assert job.progress == 100
-        assert job.diagnostics["summary"]["engine"] == "ai_dgpst_v1"
+        assert job.diagnostics["summary"]["engine"] == "ai_instantstyle_v1"
         assert job.diagnostics["summary"]["requested_style_strength"] == 0.75
         assert job.diagnostics["summary"]["effective_style_strength"] == 0.58
         assert job.diagnostics["summary"]["effective_structure_strength"] == 0.97
@@ -330,7 +328,6 @@ def test_style_indexing_persists_private_analysis_assets(
     assert derived >= {
         f"{prefix}head-mask.npy",
         f"{prefix}landmarks.npy",
-        f"{prefix}background.png",
     }
     with worker.session_factory() as db:
         indexed = db.get(StyleExample, example_id)
@@ -340,7 +337,6 @@ def test_style_indexing_persists_private_analysis_assets(
         assert set(indexed.quality["derived_assets"]) >= {
             "head_mask",
             "landmarks",
-            "background",
         }
 
 
@@ -422,7 +418,7 @@ def test_expiry_purges_objects_and_soft_deletes_records(worker: WorkerHarness) -
         assert all(asset.deleted_at is not None for asset in db.query(Asset).all())
 
 
-def test_ai_settings_ignore_classical_corrections_but_apply_background_override() -> None:
+def test_ai_settings_apply_latest_background_correction() -> None:
     settings = _ai_settings(
         {
             "style_strength": 0.7,
@@ -433,14 +429,12 @@ def test_ai_settings_ignore_classical_corrections_but_apply_background_override(
             "background_color": None,
         },
         [
-            {"type": "eye", "pupil_center": [0.4, 0.35]},
-            {"type": "mask", "points": [[0.2, 0.3]]},
             {"type": "background", "mode": "SOLID", "color": "#112233"},
         ],
     )
     request = _engine_request_settings(settings)
     assert request == {
-        "algorithm_profile": "ai_dgpst_v1",
+        "algorithm_profile": "ai_instantstyle_v1",
         "style_strength": 0.7,
         "structure_strength": 0.8,
         "inference_steps": 25,
@@ -454,17 +448,3 @@ def test_ai_settings_ignore_classical_corrections_but_apply_background_override(
 def test_missing_models_fail_closed_unless_explicit_test_fallback(worker: WorkerHarness) -> None:
     analyzer = build_portrait_analyzer(worker.infrastructure.settings)
     assert type(analyzer).__name__ == "HeuristicPortraitAnalyzer"
-
-
-def test_gpu_backend_selection_is_explicit_and_fails_without_gpu_extra(
-    worker: WorkerHarness,
-) -> None:
-    disabled = build_dense_backend(worker.infrastructure.settings, enabled=False)
-    assert type(disabled).__name__ == "NoOpDenseCorrespondence"
-    gpu_settings = worker.infrastructure.settings.model_copy(
-        update={"enable_gpu": True, "dense_alignment_device": "cuda"}
-    )
-    backend = build_dense_backend(gpu_settings, enabled=True)
-    assert isinstance(backend, KorniaGpuDenseCorrespondence)
-    with pytest.raises(OptionalDependencyError, match=r"GPU dense backend|CUDA"):
-        backend._libraries()

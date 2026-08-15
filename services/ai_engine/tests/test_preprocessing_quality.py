@@ -32,12 +32,20 @@ def test_letterbox_round_trip_restores_original_dimensions() -> None:
     assert restored.size == (1000, 1320)
 
 
-def test_official_short_side_scaling_retains_more_portrait_detail() -> None:
+def test_short_side_scaling_retains_more_portrait_detail() -> None:
     original = decode_image(_png(1000, 1320), max_bytes=1_000_000, max_pixels=2_000_000)
     scaled, transform = scale_short_side(original, 512, 768)
     restored = restore_from_resize(scaled, transform)
     assert scaled.size == (512, 672)
     assert restored.size == original.size
+
+
+def test_short_side_scaling_aligns_to_sdxl_stride() -> None:
+    original = decode_image(_png(900, 1400), max_bytes=1_000_000, max_pixels=2_000_000)
+    scaled, _ = scale_short_side(original, 1024, 1280, stride=64)
+    assert scaled.width % 64 == 0
+    assert scaled.height % 64 == 0
+    assert max(scaled.size) <= 1280
 
 
 def test_quality_guard_accepts_unchanged_image() -> None:

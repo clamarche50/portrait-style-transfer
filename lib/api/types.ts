@@ -34,7 +34,7 @@ export interface AssetRecord {
 }
 
 export type TransferSettings = Omit<ApiSchemas["TransferSettingsRequest"], "algorithm_profile" | "background_color"> & {
-  algorithm_profile: "ai_dgpst_v1";
+  algorithm_profile: "ai_instantstyle_v1";
   background_color: string | null;
 };
 
@@ -89,9 +89,4 @@ export interface StyleRecord {
   preview_url?: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface CorrectionPayload {
-  type: "mask" | "alignment" | "gain_copy" | "eye" | "background";
-  [key: string]: unknown;
 }

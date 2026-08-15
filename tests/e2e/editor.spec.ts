@@ -21,10 +21,10 @@ test("uploads a pair, observes progress, downloads, and deletes", async ({ page 
     uploads += 1;
     await route.fulfill({ json: asset(uploads === 1 ? "input-id" : "reference-id", uploads === 1 ? "INPUT" : "REFERENCE") });
   });
-  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { id: "job-id", status: "SUCCEEDED", stage: "COMPLETED", progress: 100, input_asset_id: "input-id", reference_asset_id: "reference-id", algorithm_profile: "ai_dgpst_v1", settings: { algorithm_profile: "ai_dgpst_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 }, output_url: "data:image/png;base64," + pixelPng.toString("base64"), created_at: new Date().toISOString() } }));
+  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { id: "job-id", status: "SUCCEEDED", stage: "COMPLETED", progress: 100, input_asset_id: "input-id", reference_asset_id: "reference-id", algorithm_profile: "ai_instantstyle_v1", settings: { algorithm_profile: "ai_instantstyle_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 }, output_url: "data:image/png;base64," + pixelPng.toString("base64"), created_at: new Date().toISOString() } }));
   await page.route("**/api/v1/jobs/job-id/diagnostics", (route) => route.fulfill({ json: {
     job_id: "job-id",
-    diagnostics: { profile: "ai_dgpst_v1", engine: { name: "DGPST", structure_strength: .9 } },
+    diagnostics: { profile: "ai_instantstyle_v1", engine: { name: "InstantStyle", structure_strength: .9 } },
     artifacts: [{ asset_id: "artifact-id", kind: "OTHER", download_url: "/api/v1/jobs/job-id/artifact.png" }],
   } }));
   await page.route("**/api/v1/jobs/job-id/download-url", (route) => route.fulfill({ json: { url: "/api/v1/jobs/job-id/output.png", expires_at: new Date().toISOString(), expires_in_seconds: 300 } }));
@@ -44,7 +44,7 @@ test("uploads a pair, observes progress, downloads, and deletes", async ({ page 
   await expect(page.getByText("Your finish is ready")).toBeVisible();
   await expect(page.getByText("Style transferred. Review the likeness.")).toBeVisible();
   await page.getByText("Processing diagnostics").click();
-  await expect(page.getByText('"name": "DGPST"')).toBeVisible();
+  await expect(page.getByText('"name": "InstantStyle"')).toBeVisible();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download PNG" }).click();
   expect((await download).suggestedFilename()).toBe("portrait-result.png");
@@ -61,8 +61,8 @@ test("does not expose classical correction controls for an AI job", async ({ pag
     progress: 100,
     input_asset_id: "input-id",
     reference_asset_id: "reference-id",
-    algorithm_profile: "ai_dgpst_v1",
-    settings: { algorithm_profile: "ai_dgpst_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 },
+    algorithm_profile: "ai_instantstyle_v1",
+    settings: { algorithm_profile: "ai_instantstyle_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 },
     input_preview_url: "data:image/png;base64," + pixelPng.toString("base64"),
     output_url: "data:image/png;base64," + pixelPng.toString("base64"),
     created_at: now,

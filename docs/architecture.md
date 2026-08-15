@@ -20,7 +20,7 @@ FastAPI /api/v1
           |
     CPU Celery worker -- HTTP/multipart --> ai-engine:8010
                                             |
-                                            `-- RTX GPU + read-only DGPST models
+                                            `-- RTX GPU + read-only InstantStyle models
 ```
 
 Local all-in-one deployments can put Caddy and the root Next.js server in front
@@ -32,8 +32,7 @@ replace the stateful API, worker, database, broker, object store, or AI engine.
 - `web`: root Next.js production server for local Compose.
 - `api`: validation, authorization, persistence, private content routes, and queue submission.
 - `worker-cpu`: one-job-at-a-time Celery orchestrator and the single local maintenance scheduler.
-- `ai-engine`: internal FastAPI service that owns the DGPST model and GPU. It has no host port.
-- `worker-gpu`: legacy opt-in CUDA dense-alignment worker; it is not required by `AI_DGPST_V1`.
+- `ai-engine`: internal FastAPI service that owns the InstantStyle model and GPU. It has no host port.
 - `postgres`, `redis`, `minio`: durable metadata, coordination, and private object bytes.
 - `cloudflared`: outbound tunnel client attached to the API's frontend network only.
 - `caddy`: local HTTPS reverse proxy.
@@ -42,7 +41,7 @@ replace the stateful API, worker, database, broker, object store, or AI engine.
 The CPU worker stays small and performs storage/job orchestration. A single
 long-lived AI process loads the multi-gigabyte model once, verifies every
 artifact before readiness, and serializes inference on one GPU. Model binaries
-are bind-mounted read-only at `/models/dgpst`; they are never baked into the
+are bind-mounted read-only at `/models/instantstyle`; they are never baked into the
 source image or downloaded while handling a request.
 
 ## Job lifecycle
@@ -50,12 +49,12 @@ source image or downloaded while handling a request.
 Statuses are `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCEL_REQUESTED`,
 `CANCELLED`, and `EXPIRED`.
 
-1. The API validates ownership and stores the selected `ai_dgpst_v1` settings.
+1. The API validates ownership and stores the selected `ai_instantstyle_v1` settings.
 2. The worker acquires the Redis job lease and downloads the private content and style objects.
 3. It sends both images and AI-native settings to `POST http://ai-engine:8010/v1/transfer`.
-4. The sidecar scales each image's short side toward 512, preserves aspect
-   ratio, rounds to multiples of 16, and caps the long side at 768 by default.
-5. DGPST generates one result using structure, style, step, and seed controls.
+4. The sidecar scales each image's short side toward 1024, preserves aspect
+   ratio, rounds to multiples of 64, and caps the long side at 1280 by default.
+5. InstantStyle generates one result using style, identity, step, and seed controls.
 6. The sidecar restores the content dimensions and rejects invalid pixels, changed dimensions, or stretched-border artifacts.
 7. The worker encodes the requested format, uploads output, commits success transactionally, and publishes the terminal event.
 
@@ -85,7 +84,7 @@ MinIO is not exposed through the tunnel.
 - Workers have a separate, non-published `egress` network for an explicitly
   configured managed S3 or OTLP endpoint. The AI engine is not attached to it.
 - The API and queue workers receive individual MediaPipe file mounts, not the
-  DGPST directory; only `ai-engine` can read the generative weights.
+  InstantStyle directory; only `ai-engine` can read the generative weights.
 - The AI engine runs with a read-only root filesystem, dropped capabilities, no-new-privileges, and offline Hugging Face flags.
 - Workers read only object keys already authorized and recorded on a job.
 - The model manifest uses safe relative paths, exact lengths, and SHA-256 values; readiness fails closed on any drift.

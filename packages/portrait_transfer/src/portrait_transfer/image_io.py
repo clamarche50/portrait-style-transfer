@@ -102,8 +102,8 @@ def decode_image(payload: bytes, limits: ImageLimits | None = None) -> DecodedIm
                 )
             probe.verify()
 
-        with Image.open(BytesIO(payload)) as decoded:
-            decoded = ImageOps.exif_transpose(decoded)
+        with Image.open(BytesIO(payload)) as opened:
+            decoded = ImageOps.exif_transpose(opened)
             decoded.load()
             if "A" in decoded.getbands():
                 rgba = np.asarray(decoded.convert("RGBA"))

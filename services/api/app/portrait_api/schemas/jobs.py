@@ -18,7 +18,9 @@ from pydantic import Field, model_validator
 
 
 class TransferSettingsRequest(ApiModel):
-    algorithm_profile: Literal[AlgorithmProfile.AI_DGPST_V1] = AlgorithmProfile.AI_DGPST_V1
+    algorithm_profile: Literal[AlgorithmProfile.AI_INSTANTSTYLE_V1] = (
+        AlgorithmProfile.AI_INSTANTSTYLE_V1
+    )
     style_strength: float = Field(default=0.75, ge=0.0, le=1.0)
     structure_strength: float = Field(default=0.9, ge=0.0, le=1.0)
     inference_steps: int = Field(default=30, ge=10, le=50)
@@ -152,50 +154,6 @@ class JobResponse(ApiModel):
 
 
 Coordinate = Annotated[float, Field(ge=0.0, le=1.0)]
-Point = tuple[Coordinate, Coordinate]
-
-
-class MaskCorrection(ApiModel):
-    type: Literal["mask"]
-    operation: Literal["ADD", "REMOVE"]
-    radius: float = Field(ge=0.001, le=0.5)
-    points: list[Point] = Field(min_length=1, max_length=4096)
-
-
-class AlignmentCorrection(ApiModel):
-    type: Literal["alignment"]
-    input_points: list[Point] = Field(min_length=1, max_length=128)
-    reference_points: list[Point] = Field(min_length=1, max_length=128)
-
-    @model_validator(mode="after")
-    def matching_points(self) -> AlignmentCorrection:
-        if len(self.input_points) != len(self.reference_points):
-            raise ValueError("input_points and reference_points must have the same length")
-        return self
-
-
-class GainCopyCorrection(ApiModel):
-    type: Literal["gain_copy"]
-    source_polygon: list[Point] = Field(min_length=3, max_length=256)
-    target_polygon: list[Point] = Field(min_length=3, max_length=256)
-    levels: list[int] = Field(default_factory=lambda: list(range(6)), min_length=1, max_length=6)
-
-    @model_validator(mode="after")
-    def valid_levels(self) -> GainCopyCorrection:
-        if len(set(self.levels)) != len(self.levels) or any(
-            level not in range(6) for level in self.levels
-        ):
-            raise ValueError("levels must contain unique values from 0 through 5")
-        return self
-
-
-class EyeCorrection(ApiModel):
-    type: Literal["eye"]
-    eye: Literal["LEFT", "RIGHT"]
-    pupil_center: Point
-    iris_radius: float | None = Field(default=None, ge=0.001, le=0.5)
-    highlight_scale: float | None = Field(default=None, gt=0, le=4)
-    highlight_rotation_degrees: float | None = Field(default=None, ge=-180, le=180)
 
 
 class BackgroundCorrection(ApiModel):
@@ -213,14 +171,7 @@ class BackgroundCorrection(ApiModel):
         return self
 
 
-Correction = Annotated[
-    MaskCorrection
-    | AlignmentCorrection
-    | GainCopyCorrection
-    | EyeCorrection
-    | BackgroundCorrection,
-    Field(discriminator="type"),
-]
+Correction = Annotated[BackgroundCorrection, Field(discriminator="type")]
 
 
 class CorrectionRequest(ApiModel):

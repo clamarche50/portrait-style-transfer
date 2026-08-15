@@ -1,4 +1,4 @@
-import type { AssetKind, AssetRecord, CorrectionPayload, JobDiagnosticsRecord, JobRecord, StyleRecord, TransferSettings } from "./types";
+import type { AssetKind, AssetRecord, JobDiagnosticsRecord, JobRecord, StyleRecord, TransferSettings } from "./types";
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1").replace(/\/$/, "");
 
@@ -93,10 +93,6 @@ export function deleteJob(jobId: string): Promise<void> {
 
 export function getJobDownloadUrl(jobId: string): Promise<{ url: string; expires_at: string }> {
   return request<{ url: string; expires_at: string }>(`/jobs/${jobId}/download-url`, { method: "POST", body: "{}" });
-}
-
-export function saveCorrections(jobId: string, corrections: CorrectionPayload[]): Promise<JobRecord> {
-  return request<JobRecord>(`/jobs/${jobId}/corrections`, { method: "POST", body: JSON.stringify({ corrections }) });
 }
 
 export function rerunJob(jobId: string): Promise<JobRecord> {

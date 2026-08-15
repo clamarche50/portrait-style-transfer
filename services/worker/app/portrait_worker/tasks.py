@@ -41,7 +41,7 @@ from portrait_transfer.image_io import decode_image, encode_jpeg, encode_png
 from portrait_transfer.preflight import PortraitAnalyzer, analyze_portrait
 from portrait_transfer.selection import build_style_feature
 from portrait_transfer.style_ingestion import IngestedStyle, ingest_style
-from portrait_transfer.types import EyeHighlightAsset, PortraitAnalysis, StyleFeature
+from portrait_transfer.types import PortraitAnalysis, StyleFeature
 from portrait_worker.ai_client import (
     AI_ENGINE_ID,
     AIEngineError,
@@ -491,7 +491,7 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                 raise ProcessingCancelled()
 
             reporter.emit(
-                ProcessingStage.MULTISCALE_TRANSFER,
+                ProcessingStage.AI_GENERATION,
                 15,
                 "Generating portrait with the AI style engine",
             )
@@ -563,7 +563,7 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                         ),
                     }
                     reporter.emit(
-                        ProcessingStage.MULTISCALE_TRANSFER,
+                        ProcessingStage.AI_GENERATION,
                         80,
                         "Retrying with stronger identity preservation",
                     )
@@ -796,21 +796,6 @@ def _npy_bytes(array: NDArray[Any]) -> bytes:
     return output.getvalue()
 
 
-def _eye_asset_bytes(asset: EyeHighlightAsset) -> bytes:
-    output = io.BytesIO()
-    np.savez_compressed(
-        output,
-        foreground_rgb=np.asarray(asset.foreground_rgb, dtype=np.float32),
-        alpha=np.asarray(asset.alpha, dtype=np.float32),
-        center=np.asarray(asset.center, dtype=np.float32),
-        iris_radius=np.asarray(asset.iris_radius, dtype=np.float32),
-        angle_radians=np.asarray(asset.angle_radians, dtype=np.float32),
-        confidence=np.asarray(asset.confidence, dtype=np.float32),
-        version=np.asarray(asset.version),
-    )
-    return output.getvalue()
-
-
 def _persist_ingested_style(
     infrastructure: WorkerInfrastructure,
     style_id: uuid.UUID,
@@ -821,7 +806,7 @@ def _persist_ingested_style(
 ) -> tuple[str, dict[str, Any]]:
     prefix = f"styles/{style_id}/examples/{example.id}"
     infrastructure.storage.delete_prefix(f"{prefix}/")
-    derived_assets = ["head_mask", "landmarks", "background"]
+    derived_assets = ["head_mask", "landmarks"]
     try:
         infrastructure.storage.put_bytes(
             f"{prefix}/head-mask.npy",
@@ -833,18 +818,6 @@ def _persist_ingested_style(
             _npy_bytes(ingested.analysis.landmarks),
             "application/octet-stream",
         )
-        infrastructure.storage.put_bytes(
-            f"{prefix}/background.png", encode_png(ingested.background), "image/png"
-        )
-        for side, eye_asset in zip(("left", "right"), ingested.eye_assets, strict=True):
-            if eye_asset is None:
-                continue
-            infrastructure.storage.put_bytes(
-                f"{prefix}/eye-{side}.npz",
-                _eye_asset_bytes(eye_asset),
-                "application/octet-stream",
-            )
-            derived_assets.append(f"eye_{side}")
         feature_key = StyleRankingService(infrastructure.storage).index_vector(
             style_id,
             example,

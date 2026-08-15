@@ -21,7 +21,7 @@ from typing import Any, cast
 
 import httpx
 
-AI_ENGINE_ID = "ai_dgpst_v1"
+AI_ENGINE_ID = "ai_instantstyle_v1"
 _DEFAULT_BASE_URL = "http://ai-engine:8010"
 _DEFAULT_TIMEOUT_SECONDS = 600.0
 _MAX_OUTPUT_BYTES = 96 * 1024 * 1024

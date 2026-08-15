@@ -49,7 +49,7 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
           <span className="eyebrow">03 · Direction</span>
           <h2 id="settings-title">Shape the finish</h2>
         </div>
-        <span className="method-badge"><Sparkles size={14} aria-hidden="true" /> DGPST · AI</span>
+        <span className="method-badge"><Sparkles size={14} aria-hidden="true" /> InstantStyle · AI</span>
       </div>
 
       <div className="settings-stack">

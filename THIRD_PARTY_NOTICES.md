@@ -16,14 +16,14 @@ YiChang Shih, Sylvain Paris, Connelly Barnes, William T. Freeman, and Frédo Dur
 
 The citation is attribution, not a software-license grant. The uploaded paper and serialized authors' archive are not included in this repository or its images. The archive has no clear top-level license and includes components with restrictive notices; see `docs/licensing-review.md`.
 
-The active AI engine is based on Xinbo Wang, Wenju Xu, Qing Zhang, and Wei-Shi Zheng, “Domain Generalizable Portrait Style Transfer” (ICCV 2025, arXiv:2507.04243). Its official source is `https://github.com/wangxb29/DGPST`, integrated at commit `aada535bde5b87f9ece9a4af1c0628a93f46a342`. The source repository states the MIT License. The Docker build retrieves that exact commit and applies a small asserted inference-compatibility patch; it does not copy from the uploaded 2014 archive.
+The active AI engine combines Stable Diffusion XL 1.0 with InstantStyle (Xiaoxiao Wu et al., “InstantStyle: Free Lunch towards Style-Preserving in Text-to-Image Generation”, 2024) and the IP-Adapter FaceID PlusV2 identity adapter (Hu Ye et al., “IP-Adapter: Text Compatible Image Prompt Adapter for Text-to-Image Diffusion Models”, 2023). Inference runs entirely through pinned diffusers/transformers libraries against locally mounted weights; the engine copies no upstream inference source code.
 
 ## Principal runtime libraries
 
 The application is expected to include or interact with the following projects. Their own licenses and notices govern their code:
 
 - FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, boto3, NumPy, SciPy, scikit-image, Pillow, Prometheus client, and related Python dependencies.
-- OpenCV, PyTorch, Torchvision, Diffusers, Transformers, Accelerate, safetensors, Kornia, and MediaPipe Tasks.
+- OpenCV, PyTorch, Torchvision, Diffusers, Transformers, Accelerate, PEFT, safetensors, InsightFace, ONNX Runtime, and MediaPipe Tasks.
 - Next.js, React, vinext, Vite, Tailwind CSS, and frontend dependencies.
 - PostgreSQL, Redis, MinIO, Caddy, Prometheus, and Grafana container images.
 
@@ -33,13 +33,14 @@ Common upstream licenses include Apache-2.0, BSD, MIT, PostgreSQL, and AGPL lice
 
 The Face Landmarker and selfie multiclass segmentation artifacts listed in `models/manifest.json` are downloaded separately from official MediaPipe storage.
 
-`models/dgpst/manifest.json` records the complete AI runtime set:
+`models/instantstyle/manifest.json` records the complete AI runtime set:
 
-- Stable Diffusion v1.5 from `stable-diffusion-v1-5/stable-diffusion-v1-5` at revision `451f4fe16113bff5a5d2269ed5ad43b0592e9a14`, governed by CreativeML OpenRAIL-M. Its model card documents prohibited/misuse scenarios, bias, imperfect faces, and the need for safety controls.
-- IP-Adapter full-face SD1.5 and its CLIP image encoder from `h94/IP-Adapter` at revision `018e402774aeeddd60609b4ecdb7e298259dc729`, whose repository/model card states Apache-2.0.
-- The DGPST `CelebA_default` checkpoint from the Google Drive folder linked by the official DGPST README. The DGPST repository does not state a separate license for pretrained weights. Redistribution and commercial-use status are therefore `REVIEW_REQUIRED`, even though the source code is MIT-licensed.
+- Stable Diffusion XL 1.0 base (fp16) from `stabilityai/stable-diffusion-xl-base-1.0`, governed by Stability AI's OpenRAIL++-M community license. Its model card documents prohibited/misuse scenarios, bias, and the need for safety controls.
+- The InstantStyle IP-Adapter SDXL weights and SDXL CLIP image encoder from `h94/IP-Adapter`, whose repository/model card states Apache-2.0.
+- The FaceID PlusV2 SDXL checkpoint from `h94/IP-Adapter-FaceID`, whose repository states Apache-2.0 for code; weight terms follow that card.
+- The InsightFace buffalo_l ONNX pack from `public-data/insightface`. InsightFace pretrained models are offered for non-commercial research purposes; commercial use requires separate review.
 
-Model artifacts are not covered by this repository's Apache-2.0 license. They are ignored by Git, excluded from build contexts, mounted locally, and must not be bundled with a release until their exact terms and notices have been reviewed. The PyTorch `.pth` checkpoint is pickle-capable; the runtime verifies its SHA-256 and uses `weights_only=True` before accepting it.
+Model artifacts are not covered by this repository's Apache-2.0 license. They are ignored by Git, excluded from build contexts, mounted locally, and must not be bundled with a release until their exact terms and notices have been reviewed. The FaceID `.bin` checkpoint is pickle-capable; the runtime verifies its SHA-256 and loads it with restricted `weights_only` semantics before accepting it.
 
 ## Deliberately excluded software
 
@@ -51,8 +52,8 @@ Before a release:
 
 1. Generate an SBOM from all Python, npm, and container lock data.
 2. Collect all required license texts and attribution notices.
-3. Review DGPST checkpoint rights, OpenRAIL-M obligations, IP-Adapter/MediaPipe terms, and container-image licenses.
-4. Run the copied-source compliance check.
+3. Review SDXL OpenRAIL++-M obligations, InsightFace non-commercial model terms, IP-Adapter/MediaPipe terms, and container-image licenses.
+4. Run the model-binary tracking guard.
 5. Obtain human legal review before making a commercial-distribution claim.
 6. Resolve every high or critical dependency/image advisory, or record a
    time-bounded, owner-approved exception with exploitability and mitigation.

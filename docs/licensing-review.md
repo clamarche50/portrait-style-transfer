@@ -22,12 +22,17 @@ Original repository code and documentation are offered under Apache License 2.0.
 
 ## AI engine additions
 
-The official DGPST source repository states the MIT License and is pinned to commit `aada535bde5b87f9ece9a4af1c0628a93f46a342`. Source-code permission does not automatically license its separately downloaded trained checkpoint. The official README links that checkpoint through Google Drive but does not state distinct weight terms; redistribution and commercial deployment remain `REVIEW_REQUIRED`.
+The active engine combines four artifact sets, each with its own terms:
 
-Stable Diffusion v1.5 is governed by CreativeML OpenRAIL-M, including use-based restrictions rather than a simple permissive software grant. The pinned IP-Adapter repository states Apache-2.0. Every artifact is listed in `models/dgpst/manifest.json`; recording a checksum proves which bytes were used, not permission to redistribute them.
+- Stable Diffusion XL 1.0 base (`stabilityai/stable-diffusion-xl-base-1.0`) is governed by Stability AI's OpenRAIL++-M community license, including use-based restrictions rather than a simple permissive software grant.
+- The InstantStyle IP-Adapter SDXL weights and CLIP image encoder (`h94/IP-Adapter`) state Apache-2.0.
+- The IP-Adapter FaceID PlusV2 SDXL checkpoint (`h94/IP-Adapter-FaceID`) states Apache-2.0 for the repository code; weight terms follow that card.
+- The InsightFace buffalo_l ONNX pack (`public-data/insightface`) derives from a project whose pretrained models are offered for non-commercial research purposes. Commercial-use status is therefore `REVIEW_REQUIRED`.
+
+Every artifact is listed in `models/instantstyle/manifest.json`; recording a checksum proves which bytes were used, not permission to redistribute them.
 
 The AI engine also creates synthetic alterations of identifiable people. Consent, publicity/privacy rights, deception/impersonation risk, style-reference copyright, platform policy, and output disclosure require product-level review beyond dependency licensing.
 
 ## Required human review
 
-Before public or commercial distribution, a qualified reviewer must verify clean-room provenance, DGPST checkpoint rights, OpenRAIL-M compliance, dependency/model/container obligations, any patents relevant to implementation, consent/publicity/privacy controls, style-reference and dataset rights, product naming/marketing, and all shipped notices. Until then, documentation must not claim legal clearance, guaranteed identity preservation, or exact equivalence to either paper's results.
+Before public or commercial distribution, a qualified reviewer must verify clean-room provenance, SDXL OpenRAIL++-M compliance, InsightFace non-commercial model terms, IP-Adapter/MediaPipe obligations, dependency/model/container obligations, any patents relevant to implementation, consent/publicity/privacy controls, style-reference and dataset rights, product naming/marketing, and all shipped notices. Until then, documentation must not claim legal clearance, guaranteed identity preservation, or exact equivalence to either paper's results.

@@ -42,7 +42,7 @@ Representative settings:
   "reference_asset_id": "uuid",
   "style_id": null,
   "settings": {
-    "algorithm_profile": "ai_dgpst_v1",
+    "algorithm_profile": "ai_instantstyle_v1",
     "style_strength": 0.75,
     "structure_strength": 0.9,
     "inference_steps": 30,
@@ -55,10 +55,9 @@ Representative settings:
 }
 ```
 
-`ai_dgpst_v1` is the only public profile. The server rejects the retired
-classical fields and public attempts to select `paper_exact` or
-`source_2014_compat`; there is no silent fallback from AI inference to either
-legacy engine.
+`ai_instantstyle_v1` is the only public profile. The server rejects the retired
+classical fields and any other profile value; there is no fallback from AI
+inference to another engine.
 
 ## Styles
 

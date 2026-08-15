@@ -40,9 +40,7 @@ x-app-environment: &app-environment
   FACE_LANDMARKER_MODEL: face_landmarker.task
   IMAGE_SEGMENTER_MODEL: selfie_multiclass_256x256.tflite
   REQUIRE_MODELS_FOR_READINESS: ${REQUIRE_MODELS_FOR_READINESS:-true}
-  DEFAULT_ALGORITHM_PROFILE: ai_dgpst_v1
-  ENABLE_SOURCE_COMPAT_PROFILE: ${ENABLE_SOURCE_COMPAT_PROFILE:-false}
-  DENSE_ALIGNMENT_DEVICE: ${DENSE_ALIGNMENT_DEVICE:-cpu}
+  DEFAULT_ALGORITHM_PROFILE: ai_instantstyle_v1
   ALLOW_HEURISTIC_ANALYZER: ${ALLOW_HEURISTIC_ANALYZER:-false}
   CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost,http://localhost:3000}
   SESSION_SECRET: ${SESSION_SECRET:-development-session-secret-change-me}
@@ -170,16 +168,14 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.ai-engine
-      args:
-        DGPST_COMMIT: aada535bde5b87f9ece9a4af1c0628a93f46a342
     environment:
-      DGPST_MODEL_ROOT: /models/dgpst
-      DGPST_MANIFEST_PATH: /models/dgpst/manifest.json
-      DGPST_UPSTREAM_ROOT: /opt/dgpst
-      DGPST_DEVICE: cuda
-      DGPST_DTYPE: float16
-      DGPST_MAX_LONG_SIDE: ${DGPST_MAX_LONG_SIDE:-768}
-      DGPST_VERIFY_MODELS: "true"
+      ENGINE_MODEL_ROOT: /models/instantstyle
+      ENGINE_MANIFEST_PATH: /models/instantstyle/manifest.json
+      ENGINE_DEVICE: cuda
+      ENGINE_DTYPE: float16
+      ENGINE_MAX_LONG_SIDE: ${ENGINE_MAX_LONG_SIDE:-1280}
+      ENGINE_VERIFY_MODELS: "true"
+      ENGINE_EAGER_LOAD: ${ENGINE_EAGER_LOAD:-true}
       AI_ENGINE_API_TOKEN: ${AI_ENGINE_API_TOKEN:-}
       # The API rejects normalized images that exceed the same 15 MiB bound,
       # so the private sidecar never needs a wider request allowance.
@@ -189,7 +185,7 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       DIFFUSERS_OFFLINE: "1"
     volumes:
-      - ./models/dgpst:/models/dgpst:ro
+      - ./models/instantstyle:/models/instantstyle:ro
     read_only: true
     tmpfs:
       - /tmp:size=2g,mode=1777
@@ -216,8 +212,6 @@ services:
       dockerfile: infra/docker/Dockerfile.worker-cpu
     environment:
       <<: *app-environment
-      ENABLE_GPU: "false"
-      DENSE_ALIGNMENT_DEVICE: cpu
       AI_ENGINE_URL: ${AI_ENGINE_URL:-http://ai-engine:8010}
       AI_ENGINE_REQUEST_TIMEOUT_SECONDS: ${AI_ENGINE_REQUEST_TIMEOUT_SECONDS:-600}
       AI_ENGINE_API_TOKEN: ${AI_ENGINE_API_TOKEN:-}
@@ -235,32 +229,6 @@ services:
     tmpfs:
       - /tmp:size=1g,mode=1777
     mem_limit: ${WORKER_MEMORY_LIMIT:-5g}
-    stop_grace_period: 30s
-    restart: unless-stopped
-    networks: [backend, egress]
-
-  worker-gpu:
-    profiles: [gpu]
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.worker-gpu
-    environment:
-      <<: *app-environment
-      ENABLE_GPU: "true"
-      DENSE_ALIGNMENT_DEVICE: cuda
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    volumes: *analysis-model-volumes
-    read_only: true
-    tmpfs:
-      - /tmp:size=1g,mode=1777
-    mem_limit: ${WORKER_MEMORY_LIMIT:-5g}
-    gpus: all
     stop_grace_period: 30s
     restart: unless-stopped
     networks: [backend, egress]

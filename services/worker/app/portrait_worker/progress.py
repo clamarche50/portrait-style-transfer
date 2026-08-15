@@ -2,23 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from portrait_api.models import JobStatus, ProcessingStage
 from portrait_api.repositories import JobRepository
 from portrait_worker.infrastructure import WorkerInfrastructure
-
-_PACKAGE_STAGE_MAP = {
-    "normalize": ProcessingStage.VALIDATING,
-    "preflight": ProcessingStage.FACE_LANDMARKS,
-    "crop": ProcessingStage.QUALITY_ANALYSIS,
-    "alignment": ProcessingStage.AFFINE_ALIGNMENT,
-    "dense_refinement": ProcessingStage.DENSE_ALIGNMENT,
-    "multiscale": ProcessingStage.MULTISCALE_TRANSFER,
-    "eyes": ProcessingStage.EYE_HIGHLIGHTS,
-    "background": ProcessingStage.BACKGROUND,
-    "finalize": ProcessingStage.POSTPROCESSING,
-}
 
 
 class JobLeaseLost(RuntimeError):
@@ -63,19 +50,6 @@ class JobProgressReporter:
         if not self.infrastructure.refresh_job_lock(str(self.job_id), self.lock_token):
             raise JobLeaseLost("The job execution lease was lost")
         self.infrastructure.set_progress(str(self.job_id), event)
-
-    def package_callback(self, stage: Any, percent: int, message: str) -> None:
-        stage_value = getattr(stage, "value", str(stage))
-        mapped = _PACKAGE_STAGE_MAP.get(stage_value, ProcessingStage.POSTPROCESSING)
-        if stage_value == "crop":
-            self.emit(ProcessingStage.SEGMENTATION, max(percent - 4, 1), "Segmentation completed")
-            self.emit(ProcessingStage.QUALITY_ANALYSIS, percent, message)
-            return
-        if stage_value == "dense_refinement":
-            self.emit(
-                ProcessingStage.PIECEWISE_ALIGNMENT, max(percent - 4, 1), "Landmark morph completed"
-            )
-        self.emit(mapped, percent, message)
 
     def cancel_requested(self) -> bool:
         if self.infrastructure.cancel_requested(str(self.job_id)):

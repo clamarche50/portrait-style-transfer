@@ -5,11 +5,11 @@ import { SettingsPanel } from "@/components/editor/SettingsPanel";
 import { defaultSettings } from "@/lib/validation/portrait";
 
 describe("AI transfer settings panel", () => {
-  it("shows the DGPST controls and removes classical-engine controls", () => {
+  it("shows the InstantStyle controls and removes classical-engine controls", () => {
     const onChange = vi.fn();
     render(<SettingsPanel settings={defaultSettings} onChange={onChange} />);
 
-    expect(screen.getByText("DGPST · AI")).toBeTruthy();
+    expect(screen.getByText("InstantStyle · AI")).toBeTruthy();
     expect(screen.getByRole("slider", { name: /Style strength/ })).toBeTruthy();
     expect(screen.getByRole("slider", { name: /Identity & structure/ })).toBeTruthy();
     expect(screen.getByRole("slider", { name: /Inference steps/ })).toBeTruthy();

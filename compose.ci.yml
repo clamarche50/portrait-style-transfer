@@ -1,6 +1,6 @@
 # CPU-only contract overlay for standard CI runners. Never use this file for a
-# deployment: it replaces real DGPST inference with the explicitly permitted
-# deterministic stub backend.
+# deployment: it replaces real InstantStyle inference with the explicitly
+# permitted deterministic stub backend.
 services:
   api:
     volumes: !reset []
@@ -10,10 +10,10 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.ai-engine-ci
     environment:
-      DGPST_BACKEND: stub
-      DGPST_ALLOW_STUB_BACKEND: "true"
-      DGPST_VERIFY_MODELS: "false"
-      DGPST_EAGER_LOAD: "true"
+      ENGINE_BACKEND: stub
+      ENGINE_ALLOW_STUB_BACKEND: "true"
+      ENGINE_VERIFY_MODELS: "false"
+      ENGINE_EAGER_LOAD: "true"
     volumes: !reset []
     gpus: !reset []
     mem_limit: 512m

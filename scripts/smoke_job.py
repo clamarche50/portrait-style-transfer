@@ -221,7 +221,7 @@ def main() -> int:
                 "input_asset_id": input_asset["id"],
                 "reference_asset_id": reference_asset["id"],
                 "settings": {
-                    "algorithm_profile": "ai_dgpst_v1",
+                    "algorithm_profile": "ai_instantstyle_v1",
                     "style_strength": 0.55,
                     "structure_strength": 1.0,
                     "inference_steps": 30,

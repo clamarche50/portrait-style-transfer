@@ -3,13 +3,12 @@ UV ?= uv
 NPM ?= npm
 COMPOSE ?= docker compose
 MODEL_OUTPUT_DIR ?= models
-REFERENCE_SOURCE_DIR ?= reference/original-matlab
 
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap extract-reference audit-reference models models-dgpst verify-models dev dev-down lint format \
-	typecheck test test-unit test-legacy-primitives compare-profiles test-integration \
-	test-web test-e2e test-real-models build docker-build smoke benchmark openapi \
+.PHONY: help bootstrap models models-instantstyle verify-models dev dev-down lint format \
+	typecheck test test-unit test-integration \
+	test-web test-e2e build docker-build smoke openapi \
 	migrate purge-expired
 
 help:
@@ -21,22 +20,16 @@ bootstrap:
 	$(UV) sync --project services/api --frozen
 	$(UV) sync --project services/worker --frozen
 
-extract-reference:
-	$(PYTHON) scripts/extract_reference_archive.py --source "$(REFERENCE_ARCHIVE_FILE)" --output "$(REFERENCE_SOURCE_DIR)" --manifest reference/manifests/extraction-manifest.json
-
-audit-reference:
-	$(PYTHON) scripts/audit_reference_source.py --source-dir "$(REFERENCE_SOURCE_DIR)" --manifest reference/manifests/source-audit.json --report reference/manifests/source-audit.md --production-root .
-
 models:
 	$(PYTHON) scripts/download_models.py --manifest models/manifest.json --output-dir "$(MODEL_OUTPUT_DIR)"
-	$(MAKE) models-dgpst
+	$(MAKE) models-instantstyle
 
-models-dgpst:
-	$(UV) run --with huggingface-hub==0.25.2 --with gdown==5.2.0 python scripts/provision_dgpst_models.py --download
+models-instantstyle:
+	$(PYTHON) scripts/provision_instantstyle_models.py --download
 
 verify-models:
 	$(PYTHON) scripts/download_models.py --manifest models/manifest.json --output-dir "$(MODEL_OUTPUT_DIR)" --offline
-	$(PYTHON) scripts/provision_dgpst_models.py --verify-only
+	$(PYTHON) scripts/provision_instantstyle_models.py --verify-only
 
 dev:
 	$(COMPOSE) up --build
@@ -61,12 +54,6 @@ test: test-unit test-integration test-web
 test-unit:
 	$(UV) run --project packages/portrait_transfer --extra test pytest packages/portrait_transfer/tests
 
-test-legacy-primitives:
-	$(UV) run --project packages/portrait_transfer --extra test pytest packages/portrait_transfer/tests -k "legacy or source"
-
-compare-profiles:
-	$(PYTHON) scripts/compare_legacy_profile.py --paper "$(COMPARE_PAPER_ARTIFACT)" --source "$(COMPARE_SOURCE_ARTIFACT)" --output "$(COMPARE_REPORT)"
-
 test-integration:
 	$(UV) run --project services/api pytest services/api/tests
 	$(UV) run --project services/worker pytest services/worker/tests
@@ -77,9 +64,6 @@ test-web:
 
 test-e2e:
 	$(NPM) run test:e2e
-
-test-real-models:
-	$(UV) run --project packages/portrait_transfer --extra test pytest -m real_models packages/portrait_transfer/tests tests/fixtures/private
 
 build:
 	$(NPM) run build
@@ -94,9 +78,6 @@ smoke:
 	$(COMPOSE) run --rm api alembic -c services/api/alembic.ini upgrade head
 	$(COMPOSE) up -d --build --wait --wait-timeout 900 web api ai-engine worker-cpu postgres redis minio minio-init caddy
 	$(PYTHON) scripts/smoke_stack.py --url http://localhost:8000/api/v1/health/ready
-
-benchmark:
-	$(PYTHON) scripts/benchmark_pipeline.py --command "$(BENCHMARK_COMMAND)" --runs "$(or $(BENCHMARK_RUNS),5)" --output "$(or $(BENCHMARK_REPORT),benchmark.json)"
 
 openapi:
 	sh scripts/generate_openapi_client.sh

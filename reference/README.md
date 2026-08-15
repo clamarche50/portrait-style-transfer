@@ -2,8 +2,8 @@
 
 This directory is a legal and technical boundary, not a vendored-source directory.
 
-The uploaded serialized archive may be extracted locally to `original-matlab/` with `scripts/extract_reference_archive.py`. That path and generated manifests are ignored by Git and excluded from Docker contexts. Never move extracted MATLAB, MEX, C++, paper, portrait, background, eye-layer, or candidate files into a tracked path.
+The uploaded serialized archive may be kept locally under `original-matlab/` for personal reference only. That path and any generated manifests are ignored by Git and excluded from Docker contexts. Never move MATLAB, MEX, C++, paper, portrait, background, eye-layer, or candidate files into a tracked path.
 
-The extractor treats the serialization as untrusted input, validates every member path, rejects duplicates and link-like paths, uses exclusive file creation, and never executes the result. The audit script records relative paths, sizes, and hashes without compiling source.
+Treat any archived material as untrusted input and never compile or execute it. The classical engine that was ported from this research has been removed; no shipping code copies from the archive.
 
 Only `.gitkeep` is tracked under `manifests/`; locally generated JSON reports may contain hashes or details of unredistributable material and remain ignored.

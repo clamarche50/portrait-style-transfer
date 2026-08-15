@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from portrait_transfer import (
     MediaPipePortraitAnalyzer,
-    create_default_runtime,
     mediapipe_vision,
 )
 from portrait_transfer.alignment.anchors import (
@@ -267,12 +266,6 @@ def test_grabcut_path_is_used_when_available() -> None:
     assert used
     assert refined.shape == confidence.shape
     assert refined.max() > 0.9
-
-
-def test_default_runtime_accepts_an_injected_analyzer() -> None:
-    analyzer = object()
-    runtime = create_default_runtime(enable_cpu_dense=False, analyzer=analyzer)
-    assert runtime.analyzer is analyzer
 
 
 def test_injected_analyzer_cache_identity_tracks_component_config() -> None:

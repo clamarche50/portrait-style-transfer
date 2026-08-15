@@ -17,28 +17,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Reject reference material in shipping paths
-        run: >-
-          python scripts/audit_reference_source.py
-          --source-dir reference/original-matlab
-          --production-root .
-          --allow-missing
-          --manifest /tmp/source-audit.json
-          --report /tmp/source-audit.md
       - name: Confirm Docker context exclusions
         run: |
           grep -Fx 'reference/original-matlab' .dockerignore
           grep -Fx 'reference/original-paper' .dockerignore
           grep -Fx 'clamarche50-temp-*.txt' .dockerignore
-          grep -Fx 'models/dgpst' .dockerignore
-      - name: Reject tracked DGPST model binaries
+          grep -Fx 'models/instantstyle' .dockerignore
+      - name: Reject tracked InstantStyle model binaries
         run: |
-          printf '%s\n' models/dgpst/README.md models/dgpst/manifest.json > /tmp/expected-dgpst-files.txt
-          git ls-files 'models/dgpst/*' | sort > /tmp/tracked-dgpst-files.txt
-          diff -u /tmp/expected-dgpst-files.txt /tmp/tracked-dgpst-files.txt
+          printf '%s\n' models/instantstyle/manifest.json > /tmp/expected-instantstyle-files.txt
+          git ls-files 'models/instantstyle/*' | sort > /tmp/tracked-instantstyle-files.txt
+          diff -u /tmp/expected-instantstyle-files.txt /tmp/tracked-instantstyle-files.txt
 
   web:
     runs-on: ubuntu-24.04
@@ -78,10 +67,9 @@ jobs:
           uv run --project services/api mypy services/api/app
           uv run --project services/worker mypy services/worker/app
           uv run --project services/api mypy --ignore-missing-imports services/ai_engine
-      - name: Unit and legacy primitive tests
+      - name: Package and engine unit tests
         run: |
           uv run --project packages/portrait_transfer --extra test --with pytest-cov==7.0.0 pytest packages/portrait_transfer/tests --cov=portrait_transfer --cov-report=term-missing
-          uv run --project packages/portrait_transfer --extra test pytest packages/portrait_transfer/tests -k "legacy or source"
           PYTHONPATH=. uv run --project services/api pytest services/ai_engine/tests
 
   integration:

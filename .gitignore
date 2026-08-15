@@ -6,6 +6,7 @@ node_modules/
 .vinext/
 dist/
 build-output/
+build/
 coverage/
 htmlcov/
 .coverage
@@ -18,6 +19,7 @@ blob-report/
 .ruff_cache/
 .hypothesis/
 .test-tmp*/
+.pytest-tmp/
 *.egg-info/
 __pycache__/
 *.py[cod]
@@ -62,10 +64,9 @@ models/*.bin
 models/*.pt
 models/*.pth
 models/.downloads/
-# DGPST weights are provisioned locally. Only provenance/docs are versioned.
-models/dgpst/*
-!models/dgpst/manifest.json
-!models/dgpst/README.md
+# InstantStyle weights are provisioned locally. Only the manifest is versioned.
+models/instantstyle/*
+!models/instantstyle/manifest.json
 
 # Original research material: never track or ship
 reference/original-matlab/

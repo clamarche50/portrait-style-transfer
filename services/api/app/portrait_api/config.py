@@ -61,10 +61,7 @@ class Settings(BaseSettings):
     model_manifest_file: str = "manifest.json"
     require_models_for_readiness: bool = True
     allow_heuristic_analyzer: bool = False
-    enable_gpu: bool = False
-    dense_alignment_device: str = "cpu"
-    default_algorithm_profile: Literal["ai_dgpst_v1"] = "ai_dgpst_v1"
-    enable_source_compat_profile: bool = False
+    default_algorithm_profile: Literal["ai_instantstyle_v1"] = "ai_instantstyle_v1"
 
     cors_origins: CsvList = ["http://localhost:3000"]
     session_secret: SecretStr = SecretStr("development-only-change-me")
@@ -133,8 +130,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "AI_ENGINE_API_TOKEN must contain at least 32 characters in production"
                 )
-        if self.enable_gpu and not self.dense_alignment_device.lower().startswith("cuda"):
-            raise ValueError("ENABLE_GPU requires DENSE_ALIGNMENT_DEVICE=cuda")
         return self
 
 

@@ -11,7 +11,7 @@ class TransferRequestSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    algorithm_profile: Literal["ai_dgpst_v1"] = "ai_dgpst_v1"
+    algorithm_profile: Literal["ai_instantstyle_v1"] = "ai_instantstyle_v1"
     style_strength: float = Field(default=0.75, ge=0.0, le=1.0)
     structure_strength: float = Field(default=0.9, ge=0.0, le=1.0)
     inference_steps: int = Field(default=30, ge=10, le=50)

@@ -12,11 +12,17 @@ def _as_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ServiceConfig:
     model_root: Path
     manifest_path: Path
-    upstream_root: Path
     device: str
     dtype: str
     verify_models: bool
@@ -26,40 +32,56 @@ class ServiceConfig:
     api_token: str | None
     max_upload_bytes: int
     max_decoded_pixels: int
-    inference_size: int
+    inference_short_side: int
     max_long_side: int
+    guidance_scale: float
+    style_scale_limit: float
+    faceid_scale_limit: float
+    prompt: str
+    negative_prompt: str
 
     @classmethod
     def from_environment(cls) -> "ServiceConfig":
-        model_root = Path(os.getenv("DGPST_MODEL_ROOT", "/models/dgpst"))
-        dtype = os.getenv("DGPST_DTYPE", "float16").strip().lower()
+        model_root = Path(os.getenv("ENGINE_MODEL_ROOT", "/models/instantstyle"))
+        dtype = os.getenv("ENGINE_DTYPE", "float16").strip().lower()
         if dtype not in {"float16", "bfloat16", "float32"}:
-            raise ValueError("DGPST_DTYPE must be float16, bfloat16, or float32")
-        inference_size = int(os.getenv("DGPST_INFERENCE_SIZE", "512"))
-        if inference_size < 256 or inference_size > 1024 or inference_size % 64:
-            raise ValueError(
-                "DGPST_INFERENCE_SIZE must be a multiple of 64 from 256 to 1024"
-            )
-        max_long_side = int(os.getenv("DGPST_MAX_LONG_SIDE", "768"))
-        if max_long_side < inference_size or max_long_side > 1024 or max_long_side % 16:
-            raise ValueError(
-                "DGPST_MAX_LONG_SIDE must be a multiple of 16 between inference size and 1024"
-            )
+            raise ValueError("ENGINE_DTYPE must be float16, bfloat16, or float32")
+        short_side = _bounded_int("ENGINE_INFERENCE_SHORT_SIDE", 1024, 512, 1024)
+        if short_side % 64:
+            raise ValueError("ENGINE_INFERENCE_SHORT_SIDE must be a multiple of 64")
+        max_long_side = _bounded_int("ENGINE_MAX_LONG_SIDE", 1280, short_side, 1536)
+        if max_long_side % 64:
+            raise ValueError("ENGINE_MAX_LONG_SIDE must be a multiple of 64")
+        guidance_scale = float(os.getenv("ENGINE_GUIDANCE_SCALE", "5.0"))
+        if guidance_scale < 1.0 or guidance_scale > 12.0:
+            raise ValueError("ENGINE_GUIDANCE_SCALE must be between 1.0 and 12.0")
+        style_scale_limit = float(os.getenv("ENGINE_STYLE_SCALE_LIMIT", "1.0"))
+        faceid_scale_limit = float(os.getenv("ENGINE_FACEID_SCALE_LIMIT", "1.0"))
+        if not 0.0 < style_scale_limit <= 1.0 or not 0.0 < faceid_scale_limit <= 1.0:
+            raise ValueError("ENGINE scale limits must be within (0.0, 1.0]")
         return cls(
             model_root=model_root,
             manifest_path=Path(
-                os.getenv("DGPST_MANIFEST_PATH", str(model_root / "manifest.json"))
+                os.getenv("ENGINE_MANIFEST_PATH", str(model_root / "manifest.json"))
             ),
-            upstream_root=Path(os.getenv("DGPST_UPSTREAM_ROOT", "/opt/dgpst")),
-            device=os.getenv("DGPST_DEVICE", "cuda").strip().lower(),
+            device=os.getenv("ENGINE_DEVICE", "cuda").strip().lower(),
             dtype=dtype,
-            verify_models=_as_bool("DGPST_VERIFY_MODELS", True),
-            eager_load=_as_bool("DGPST_EAGER_LOAD", True),
-            backend=os.getenv("DGPST_BACKEND", "dgpst").strip().lower(),
-            allow_stub_backend=_as_bool("DGPST_ALLOW_STUB_BACKEND", False),
+            verify_models=_as_bool("ENGINE_VERIFY_MODELS", True),
+            eager_load=_as_bool("ENGINE_EAGER_LOAD", True),
+            backend=os.getenv("ENGINE_BACKEND", "instantstyle").strip().lower(),
+            allow_stub_backend=_as_bool("ENGINE_ALLOW_STUB_BACKEND", False),
             api_token=os.getenv("AI_ENGINE_API_TOKEN") or None,
             max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024))),
             max_decoded_pixels=int(os.getenv("MAX_DECODED_PIXELS", "8000000")),
-            inference_size=inference_size,
+            inference_short_side=short_side,
             max_long_side=max_long_side,
+            guidance_scale=guidance_scale,
+            style_scale_limit=style_scale_limit,
+            faceid_scale_limit=faceid_scale_limit,
+            prompt=os.getenv("ENGINE_PROMPT", "a high quality portrait photo"),
+            negative_prompt=os.getenv(
+                "ENGINE_NEGATIVE_PROMPT",
+                "lowres, blurry, deformed, distorted face, bad anatomy, "
+                "watermark, signature, text",
+            ),
         )

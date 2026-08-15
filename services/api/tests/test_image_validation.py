@@ -62,4 +62,4 @@ def test_normalization_never_mutates_pillow_process_global() -> None:
 
     ImageNormalizer(_settings()).normalize(output.getvalue(), "image/png")
 
-    assert Image.MAX_IMAGE_PIXELS == process_limit
+    assert process_limit == Image.MAX_IMAGE_PIXELS

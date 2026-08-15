@@ -7,12 +7,10 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from .background import extract_reference_background
-from .eyes.extraction import extract_highlight_asset
 from .image_io import normalize_rgb
 from .preflight import PortraitAnalyzer, analyze_portrait
 from .selection import build_style_feature
-from .types import EyeHighlightAsset, PortraitAnalysis, StyleFeature
+from .types import PortraitAnalysis, StyleFeature
 
 
 @dataclass(frozen=True)
@@ -21,8 +19,6 @@ class IngestedStyle:
     rgb: NDArray[np.float32]
     analysis: PortraitAnalysis
     feature: StyleFeature
-    background: NDArray[np.float32]
-    eye_assets: tuple[EyeHighlightAsset | None, EyeHighlightAsset | None]
 
 
 def ingest_style(
@@ -38,8 +34,4 @@ def ingest_style(
         landmarks=analysis.landmarks,
         mask_quality=analysis.quality.mask_confidence,
     )
-    background = extract_reference_background(image, analysis.masks.foreground_alpha)
-    eyes = tuple(extract_highlight_asset(image, iris) for iris in analysis.masks.irises)
-    return IngestedStyle(
-        identifier, image, analysis, feature, background, (eyes[0], eyes[1])
-    )
+    return IngestedStyle(identifier, image, analysis, feature)

@@ -3,14 +3,11 @@ from __future__ import annotations
 import gc
 import importlib
 import logging
-import sys
 import threading
 import time
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, Protocol
 
-import numpy as np
 from PIL import Image
 
 from .config import ServiceConfig
@@ -20,6 +17,8 @@ from .preprocessing import encode_png, restore_from_resize, scale_short_side
 from .quality import validate_output
 
 LOGGER = logging.getLogger("portrait_ai_engine")
+
+ENGINE_ID = "ai_instantstyle_v1"
 
 
 class Backend(Protocol):
@@ -62,141 +61,126 @@ class StubBackend:
         }
 
 
-class DGPSTBackend:
+class InstantStyleBackend:
+    """SDXL + InstantStyle (style) + FaceID PlusV2 (identity) portrait engine."""
+
     def __init__(self, config: ServiceConfig) -> None:
         self.config = config
         self.torch = importlib.import_module("torch")
         if config.device != "cuda" or not self.torch.cuda.is_available():
             raise EngineFailure(
                 "AI_CUDA_UNAVAILABLE",
-                "DGPST requires a CUDA GPU; the RTX worker could not access one",
+                "The portrait engine requires a CUDA GPU; the worker could not access one",
             )
-        upstream = str(config.upstream_root)
-        if upstream not in sys.path:
-            sys.path.insert(0, upstream)
-        self.device = self.torch.device("cuda:0")
         self.dtype = getattr(self.torch, config.dtype)
-        self.model = self._load_model()
+        self.pipe, self.style_clip, self.face_clip = self._load_pipeline()
+        self.style_clip_processor, self.face_clip_processor = self._load_processors()
+        self.faces = self._load_face_analyzer()
 
-    def _load_model(self) -> Any:
+    def _load_pipeline(self) -> Any:
         torch = self.torch
         model_root = self.config.model_root
-        base_path = model_root / "stable-diffusion-v1-5"
-        controlnet_path = model_root / "checkpoints" / "CelebA_default"
-        image_encoder_path = model_root / "ip_adapter" / "models" / "image_encoder"
-        ip_adapter_path = (
-            model_root
-            / "ip_adapter"
-            / "models"
-            / "ip-adapter-full-face_sd15.safetensors"
-        )
-        checkpoint_path = controlnet_path / "latest_checkpoint.pth"
 
-        from diffusers import ControlNetModel
-        from ip_adapter.ip_adapter_control import IPAdapter2
-        from models.DGPST_model import DGPSTModel, WavePool, WaveUnpool
-        from models.networks.dift_sd import MyUNet2DConditionModel
-        from models.pipeline_dgpst import DGPSTPipeline
-        from src.config import RunConfig
-        from src.eunms import Model_Type, Scheduler_Type
-        from src.schedulers.ddim_scheduler import MyDDIMScheduler
-        from torchvision import transforms
+        from diffusers import DDIMScheduler, StableDiffusionXLPipeline
+        from transformers import CLIPVisionModelWithProjection
 
-        opt = SimpleNamespace(
-            auto_mask=False,
-            checkpoints_dir=str(controlnet_path.parent),
-            continue_train=False,
-            gamma_interpolate=0.75,
-            isTrain=False,
-            lambda_Cycwarp=0.0,
-            lambda_Maskwarp=0.0,
-            local_rank=0,
-            name=controlnet_path.name,
-            num_gpus=1,
-            post_process=False,
-            pretrained_name=None,
-            prompt_content="a photo of a portrait",
-            prompt_output="a photo of a portrait",
-            prompt_style="a photo of a portrait",
-            region_style=False,
-            resume_iter="latest",
-            structure_strength=0.9,
-            inference_steps=30,
-            training_stage=2,
-            up_ft_index=2,
-        )
-        model = DGPSTModel(opt)
         load_options = {
             "local_files_only": True,
             "torch_dtype": self.dtype,
             "use_safetensors": True,
         }
-        variant_options = {"variant": "fp16"} if self.config.dtype == "float16" else {}
-        unet = MyUNet2DConditionModel.from_pretrained(
-            str(base_path), subfolder="unet", **load_options, **variant_options
+        variant_options = (
+            {"variant": "fp16"} if self.config.dtype in {"float16", "bfloat16"} else {}
         )
-        controlnet = ControlNetModel.from_pretrained(
-            str(controlnet_path), **load_options
-        )
-        pipe = DGPSTPipeline.from_pretrained(
-            str(base_path),
-            controlnet=controlnet,
-            unet=unet,
-            safety_checker=None,
-            requires_safety_checker=False,
+        pipe = StableDiffusionXLPipeline.from_pretrained(
+            str(model_root / "sdxl-base"),
             **load_options,
             **variant_options,
         )
-        pipe.scheduler = MyDDIMScheduler.from_config(pipe.scheduler.config)
-        pipe.cfg = RunConfig(
-            model_type=Model_Type.SD15,
-            num_inference_steps=30,
-            num_inversion_steps=10,
-            num_renoise_steps=1,
-            scheduler_type=Scheduler_Type.DDIM,
-            perform_noise_correction=False,
-            seed=0,
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+        # InstantStyle injects style through two attention layers only; the
+        # FaceID PlusV2 adapter preserves the subject's identity.
+        pipe.load_ip_adapter(
+            str(model_root / "ip-adapter"),
+            subfolder="sdxl_models",
+            weight_name="ip-adapter_sdxl.safetensors",
+            image_encoder_folder=None,
         )
+        pipe.load_ip_adapter(
+            str(model_root / "faceid"),
+            subfolder=None,
+            weight_name="ip-adapter-faceid-plusv2_sdxl.bin",
+            image_encoder_folder=None,
+        )
+        style_clip = CLIPVisionModelWithProjection.from_pretrained(
+            str(model_root / "ip-adapter" / "sdxl_models" / "image_encoder"),
+            local_files_only=True,
+        ).eval()
+        face_clip = CLIPVisionModelWithProjection.from_pretrained(
+            str(model_root / "ip-adapter" / "models" / "image_encoder"),
+            local_files_only=True,
+        ).eval()
         pipe.enable_vae_slicing()
         pipe.enable_vae_tiling()
         pipe.set_progress_bar_config(disable=True)
-        model.ip_model = IPAdapter2(
-            pipe, str(image_encoder_path), str(ip_adapter_path), self.device
-        )
-        state = torch.load(
-            str(checkpoint_path), map_location="cpu", weights_only=True, mmap=True
-        )
-        incompatible = model.load_state_dict(state, strict=False)
-        unexpected = [
-            name
-            for name in incompatible.unexpected_keys
-            if not name.startswith("model.")
-        ]
-        if unexpected:
-            LOGGER.info("Ignored %d training-only checkpoint keys", len(unexpected))
-        del state
-        gc.collect()
-
-        model.to_tensor = transforms.Compose([transforms.ToTensor()])
-        model.wav = WavePool(3)
-        model.wavunpool = WaveUnpool(3)
-        model.wav4 = WavePool(4)
-        model.wavunpool4 = WaveUnpool(4)
-        model.to(device=self.device, dtype=self.dtype)
-        model.requires_grad_(False)
-        model.eval()
+        # Keeps the RTX worker inside 12GB of VRAM by staging UNet/text
+        # encoder/VAE transfers to the GPU only while they run.
+        pipe.enable_model_cpu_offload()
         torch.cuda.empty_cache()
-        return model
+        gc.collect()
+        return pipe, style_clip, face_clip
 
-    def _tensor(self, image: Image.Image) -> Any:
-        torch = self.torch
-        array = np.asarray(image, dtype=np.float32) / 127.5 - 1.0
-        return (
-            torch.from_numpy(array)
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .to(device=self.device, dtype=self.dtype)
+    def _load_processors(self) -> Any:
+        from transformers import CLIPImageProcessor
+
+        model_root = self.config.model_root
+        style_clip_processor = CLIPImageProcessor.from_pretrained(
+            str(model_root / "ip-adapter" / "sdxl_models" / "image_encoder"),
+            local_files_only=True,
         )
+        face_clip_processor = CLIPImageProcessor.from_pretrained(
+            str(model_root / "ip-adapter" / "models" / "image_encoder"),
+            local_files_only=True,
+        )
+        return style_clip_processor, face_clip_processor
+
+    def _load_face_analyzer(self) -> Any:
+        from .faceid import FaceIdentityExtractor
+
+        return FaceIdentityExtractor(self.config.model_root / "insightface")
+
+    def _style_embeds(self, style: Image.Image) -> Any:
+        torch = self.torch
+        inputs = self.style_clip_processor(images=style, return_tensors="pt")
+        with torch.inference_mode():
+            hidden = self.style_clip(**inputs, output_hidden_states=True).hidden_states[
+                -2
+            ]
+        embeds = torch.cat([torch.zeros_like(hidden), hidden], dim=0).unsqueeze(1)
+        return embeds.to(device="cuda", dtype=self.dtype)
+
+    def _faceid_embeds(self, content: Image.Image, face: Any) -> tuple[Any, Any]:
+        from .faceid import FaceIdentityExtractor
+
+        torch = self.torch
+        embedding = torch.from_numpy(face.embedding).unsqueeze(0)
+        id_embeds = (
+            torch.cat([torch.zeros_like(embedding), embedding], dim=0)
+            .unsqueeze(1)
+            .to(device="cuda", dtype=self.dtype)
+        )
+        face_crop = FaceIdentityExtractor.crop(content, face.bbox)
+        inputs = self.face_clip_processor(images=face_crop, return_tensors="pt")
+        with torch.inference_mode():
+            hidden = self.face_clip(**inputs, output_hidden_states=True).hidden_states[
+                -2
+            ]
+        clip_embeds = (
+            torch.cat([torch.zeros_like(hidden), hidden], dim=0)
+            .unsqueeze(1)
+            .to(device="cuda", dtype=self.dtype)
+        )
+        return id_embeds, clip_embeds
 
     def generate(
         self,
@@ -209,70 +193,70 @@ class DGPSTBackend:
         seed: int,
     ) -> tuple[Image.Image, dict[str, Any]]:
         torch = self.torch
-        self.model.opt.gamma_interpolate = style_strength
-        self.model.opt.structure_strength = structure_strength
-        self.model.opt.inference_steps = inference_steps
-        self.model.ip_model.pipe.cfg.seed = seed
-        before_peak = torch.cuda.max_memory_allocated(self.device)
-        torch.cuda.reset_peak_memory_stats(self.device)
+        face = self.faces.extract(content)
+        if face is None:
+            raise EngineFailure(
+                "AI_FACE_NOT_FOUND",
+                "No face could be detected in the portrait",
+                retryable=False,
+            )
+        style_scale = min(style_strength, self.config.style_scale_limit)
+        faceid_scale = min(structure_strength, self.config.faceid_scale_limit)
+        before_peak = torch.cuda.max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
         started = time.perf_counter()
         try:
-            with (
-                torch.inference_mode(),
-                torch.autocast(
-                    device_type="cuda",
-                    dtype=self.dtype,
-                    enabled=self.dtype != torch.float32,
-                ),
-            ):
-                prediction, _ = self.model.generate(
-                    real_B=self._tensor(style),
-                    real_A=self._tensor(content),
-                    mask=None,
-                    mask_ref=None,
-                    seed=seed,
+            with torch.inference_mode():
+                style_embeds = self._style_embeds(style)
+                id_embeds, clip_embeds = self._faceid_embeds(content, face)
+                faceid_projection = (
+                    self.pipe.unet.encoder_hid_proj.image_projection_layers[1]
                 )
-            if (
-                prediction.ndim != 4
-                or prediction.shape[0] < 1
-                or prediction.shape[1] != 3
-                or tuple(prediction.shape[-2:]) != (content.height, content.width)
-                or not bool(torch.isfinite(prediction).all().item())
-            ):
-                raise EngineFailure(
-                    "AI_QUALITY_GUARD_FAILED",
-                    "The AI engine produced an invalid image tensor",
-                    retryable=False,
+                faceid_projection.clip_embeds = clip_embeds
+                faceid_projection.shortcut = False
+                # InstantStyle keeps style inside down.block_2 / up.block_0 so
+                # identity-critical layers stay untouched.
+                self.pipe.set_ip_adapter_scale(
+                    [
+                        {
+                            "down": {"block_2": [0.0, style_scale]},
+                            "up": {"block_0": [style_scale, 0.0]},
+                        },
+                        faceid_scale,
+                    ]
                 )
-            output = (
-                prediction[0]
-                .detach()
-                .float()
-                .clamp(-1.0, 1.0)
-                .add(1.0)
-                .mul(127.5)
-                .permute(1, 2, 0)
-                .cpu()
-                .numpy()
-                .round()
-                .astype(np.uint8)
-            )
+                generator = torch.Generator(device="cpu").manual_seed(seed)
+                result = self.pipe(
+                    prompt=self.config.prompt,
+                    negative_prompt=self.config.negative_prompt,
+                    width=content.width,
+                    height=content.height,
+                    ip_adapter_image_embeds=[style_embeds, id_embeds],
+                    num_inference_steps=inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    generator=generator,
+                    eta=0.0,
+                )
+            output = result.images[0]
+            if output.size != content.size:
+                output = output.resize(content.size, Image.Resampling.LANCZOS)
         except torch.OutOfMemoryError as exc:
             torch.cuda.empty_cache()
             raise EngineFailure(
                 "AI_GPU_OUT_OF_MEMORY",
-                "The GPU does not have enough free memory for DGPST; close GPU-heavy apps and retry",
+                "The GPU does not have enough free memory; close GPU-heavy apps and retry",
                 retryable=True,
             ) from exc
         finally:
             gc.collect()
         elapsed = time.perf_counter() - started
-        peak = max(before_peak, torch.cuda.max_memory_allocated(self.device))
-        return Image.fromarray(output), {
-            "backend": "dgpst",
+        peak = max(before_peak, torch.cuda.max_memory_allocated())
+        return output, {
+            "backend": "instantstyle",
             "inference_seconds": round(elapsed, 3),
             "peak_vram_mib": round(peak / (1024 * 1024), 1),
             "torch_version": str(torch.__version__),
+            "face_det_score": round(face.det_score, 3),
         }
 
 
@@ -298,11 +282,11 @@ class EngineRuntime:
                 if not self.config.allow_stub_backend:
                     raise EngineFailure(
                         "AI_STUB_FORBIDDEN",
-                        "The stub backend requires DGPST_ALLOW_STUB_BACKEND=true",
+                        "The stub backend requires ENGINE_ALLOW_STUB_BACKEND=true",
                     )
                 backend: Backend = StubBackend()
-            elif self.config.backend == "dgpst":
-                backend = DGPSTBackend(self.config)
+            elif self.config.backend == "instantstyle":
+                backend = InstantStyleBackend(self.config)
             else:
                 raise EngineFailure("AI_BACKEND_INVALID", "Unknown AI backend")
             self._state = _LoadedState(backend, manifest, time.time())
@@ -313,12 +297,12 @@ class EngineRuntime:
         manifest = self._state.manifest
         return {
             "status": "ready",
-            "engine": "ai_dgpst_v1",
+            "engine": ENGINE_ID,
             "backend": self.config.backend,
             "model_artifacts": manifest.artifact_count if manifest else None,
             "model_bytes": manifest.total_bytes if manifest else None,
             "manifest_sha256": manifest.manifest_sha256 if manifest else None,
-            "inference_size": self.config.inference_size,
+            "inference_short_side": self.config.inference_short_side,
             "max_long_side": self.config.max_long_side,
         }
 
@@ -341,7 +325,7 @@ class EngineRuntime:
             return TransferOutput(
                 encode_png(content),
                 {
-                    "engine": "ai_dgpst_v1",
+                    "engine": ENGINE_ID,
                     "seed": settings.random_seed,
                     "model_manifest_sha256": manifest_sha256,
                     "identity_short_circuit": True,
@@ -349,10 +333,16 @@ class EngineRuntime:
                 },
             )
         content_model, content_transform = scale_short_side(
-            content, self.config.inference_size, self.config.max_long_side
+            content,
+            self.config.inference_short_side,
+            self.config.max_long_side,
+            stride=64,
         )
         style_model, _ = scale_short_side(
-            style, self.config.inference_size, self.config.max_long_side
+            style,
+            self.config.inference_short_side,
+            self.config.max_long_side,
+            stride=64,
         )
         attempt_settings = list(
             dict.fromkeys(
@@ -382,7 +372,7 @@ class EngineRuntime:
                     restored = restore_from_resize(generated, content_transform)
                     report = validate_output(content, restored)
                     diagnostics = {
-                        "engine": "ai_dgpst_v1",
+                        "engine": ENGINE_ID,
                         "seed": settings.random_seed,
                         "model_manifest_sha256": manifest_sha256,
                         "content_model_size": list(content_model.size),
@@ -410,7 +400,7 @@ class EngineRuntime:
                             exc.code, exc.message, retryable=False
                         ) from exc
                     LOGGER.warning(
-                        "DGPST attempt %d failed quality/resource guard: %s",
+                        "InstantStyle attempt %d failed quality/resource guard: %s",
                         attempt,
                         exc,
                     )

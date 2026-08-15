@@ -138,9 +138,9 @@ class WorkerHarness:
                 input_asset_id=input_asset.id,
                 reference_asset_id=reference_asset.id,
                 style_id=None,
-                algorithm_profile=AlgorithmProfile.AI_DGPST_V1,
+                algorithm_profile=AlgorithmProfile.AI_INSTANTSTYLE_V1,
                 settings={
-                    "algorithm_profile": "ai_dgpst_v1",
+                    "algorithm_profile": "ai_instantstyle_v1",
                     "style_strength": 0.75,
                     "structure_strength": 0.9,
                     "inference_steps": 30,

@@ -112,7 +112,7 @@ def test_reference_job_lifecycle_sse_cancel_and_download(
             "input_asset_id": input_asset["id"],
             "reference_asset_id": reference_asset["id"],
             "settings": {
-                "algorithm_profile": "ai_dgpst_v1",
+                "algorithm_profile": "ai_instantstyle_v1",
                 "style_strength": 0.8,
                 "structure_strength": 0.95,
                 "inference_steps": 24,
@@ -124,9 +124,9 @@ def test_reference_job_lifecycle_sse_cancel_and_download(
     assert response.status_code == 202, response.text
     job = response.json()
     assert job["status"] == "QUEUED"
-    assert job["algorithm_profile"] == "ai_dgpst_v1"
+    assert job["algorithm_profile"] == "ai_instantstyle_v1"
     assert job["settings"] == {
-        "algorithm_profile": "ai_dgpst_v1",
+        "algorithm_profile": "ai_instantstyle_v1",
         "style_strength": 0.8,
         "structure_strength": 0.95,
         "inference_steps": 24,
@@ -195,7 +195,7 @@ def test_openapi_exposes_only_ai_native_transfer_controls(api: ApiHarness) -> No
         "output_format",
         "jpeg_quality",
     }
-    assert properties["algorithm_profile"]["default"] == "ai_dgpst_v1"
+    assert properties["algorithm_profile"]["default"] == "ai_instantstyle_v1"
     assert properties["style_strength"]["default"] == 0.75
     assert properties["structure_strength"]["default"] == 0.9
     assert properties["inference_steps"] == {
@@ -257,7 +257,7 @@ def test_style_crud_index_and_rank_use_real_feature_code(api: ApiHarness) -> Non
         json={
             "input_asset_id": input_asset["id"],
             "style_id": style_id,
-            "settings": {"algorithm_profile": "ai_dgpst_v1"},
+            "settings": {"algorithm_profile": "ai_instantstyle_v1"},
         },
         headers=api.unsafe_headers,
     )
@@ -423,7 +423,7 @@ def test_ai_background_correction_forces_full_rerun_and_clears_private_cache(
         repository.mark_succeeded(
             job,
             {
-                "summary": {"profile": "ai_dgpst_v1"},
+                "summary": {"profile": "ai_instantstyle_v1"},
                 "private_cache_manifest": {
                     "affine": {"key": affine_key, "stage": "AFFINE_ALIGNMENT"},
                     "gain": {"key": gain_key, "stage": "MULTISCALE_TRANSFER"},
@@ -495,7 +495,7 @@ def test_ai_job_rejects_classical_corrections(api: ApiHarness) -> None:
         headers=api.unsafe_headers,
     )
     assert rejected.status_code == 422
-    assert rejected.json()["error"]["code"] == "AI_CORRECTION_UNSUPPORTED"
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
     with Session(api.engine) as db:
         job = db.get(Job, job_id)
         assert job is not None

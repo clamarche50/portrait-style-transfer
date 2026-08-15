@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from .config import ServiceConfig
 from .contracts import EngineFailure, TransferRequestSettings
 from .preprocessing import decode_image
-from .runtime import EngineRuntime
+from .runtime import ENGINE_ID, EngineRuntime
 
 logging.basicConfig(level="INFO")
 LOGGER = logging.getLogger("portrait_ai_engine")
@@ -32,7 +32,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Portrait DGPST inference service",
+    title="Portrait InstantStyle inference service",
     version="1.0.0",
     docs_url=None,
     redoc_url=None,
@@ -124,7 +124,7 @@ async def transfer(
             content=result.image_png,
             media_type="image/png",
             headers={
-                "X-Portrait-Engine": "ai_dgpst_v1",
+                "X-Portrait-Engine": ENGINE_ID,
                 "X-Portrait-Diagnostics": diagnostic_header,
                 "Cache-Control": "no-store",
             },
@@ -137,7 +137,7 @@ async def transfer(
         status = 503 if exc.code.startswith(("AI_CUDA", "AI_MODEL", "AI_GPU")) else 422
         return _error(exc, status)
     except Exception:
-        LOGGER.exception("Unhandled DGPST inference failure")
+        LOGGER.exception("Unhandled InstantStyle inference failure")
         return _error(
             EngineFailure(
                 "AI_INFERENCE_FAILED", "The AI engine failed safely", retryable=True

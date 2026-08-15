@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, RefreshCw, Trash2 } from "lucide-react";
 import { deleteJob, getJob, getJobDownloadUrl, rerunJob } from "@/lib/api/client";
 import type { JobRecord } from "@/lib/api/types";
-import { CorrectionStudio } from "@/components/editor/CorrectionStudio";
 import { DiagnosticsPanel } from "@/components/editor/DiagnosticsPanel";
 import { PortraitComparison } from "@/components/editor/PortraitComparison";
 import { ProgressTimeline } from "@/components/editor/ProgressTimeline";
@@ -34,9 +33,6 @@ export function JobWorkspace({ jobId }: { jobId: string }) {
       <ProgressTimeline job={job} />
       {job.status === "SUCCEEDED" && job.input_preview_url && job.output_url && <PortraitComparison job={job} inputUrl={job.input_preview_url} outputUrl={job.output_url} onDownload={download} onRetry={retry} onDelete={remove} />}
       <DiagnosticsPanel job={job} />
-      {job.status === "SUCCEEDED" && job.algorithm_profile !== "ai_dgpst_v1" && (
-        <CorrectionStudio job={job} previewUrl={job.output_url} onRerun={replaceJob} />
-      )}
     </main>
   );
 }

@@ -16,7 +16,6 @@ def _config() -> ServiceConfig:
     return ServiceConfig(
         model_root=Path("unused"),
         manifest_path=Path("unused/manifest.json"),
-        upstream_root=Path("unused/upstream"),
         device="cpu",
         dtype="float32",
         verify_models=False,
@@ -26,8 +25,13 @@ def _config() -> ServiceConfig:
         api_token=None,
         max_upload_bytes=1024,
         max_decoded_pixels=100_000,
-        inference_size=256,
+        inference_short_side=256,
         max_long_side=384,
+        guidance_scale=5.0,
+        style_scale_limit=1.0,
+        faceid_scale_limit=1.0,
+        prompt="a high quality portrait photo",
+        negative_prompt="lowres",
     )
 
 
@@ -53,7 +57,7 @@ def test_keyword_roles_are_not_reversed() -> None:
         style=style,
         settings=TransferRequestSettings(style_strength=1),
     )
-    assert result.diagnostics["engine"] == "ai_dgpst_v1"
+    assert result.diagnostics["engine"] == "ai_instantstyle_v1"
     output = Image.open(io.BytesIO(result.image_png)).convert("RGB")
     pixel = output.getpixel((output.width // 2, output.height // 2))
     assert isinstance(pixel, tuple)
@@ -65,5 +69,10 @@ def test_keyword_roles_are_not_reversed() -> None:
 def test_engine_settings_reject_unknown_classical_controls() -> None:
     with pytest.raises(ValidationError):
         TransferRequestSettings.model_validate(
-            {"algorithm_profile": "ai_dgpst_v1", "residual_strength": 1.0}
+            {"algorithm_profile": "ai_instantstyle_v1", "residual_strength": 1.0}
         )
+
+
+def test_engine_settings_reject_legacy_dgpst_profile() -> None:
+    with pytest.raises(ValidationError):
+        TransferRequestSettings.model_validate({"algorithm_profile": "ai_dgpst_v1"})

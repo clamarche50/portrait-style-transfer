@@ -19,8 +19,8 @@ describe("portrait file validation", () => {
 });
 
 describe("transfer settings", () => {
-  it("uses the versioned DGPST AI profile", () => {
-    expect(settingsSchema.parse(defaultSettings).algorithm_profile).toBe("ai_dgpst_v1");
+  it("uses the versioned InstantStyle AI profile", () => {
+    expect(settingsSchema.parse(defaultSettings).algorithm_profile).toBe("ai_instantstyle_v1");
   });
 
   it("rejects out-of-range AI controls", () => {

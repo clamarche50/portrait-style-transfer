@@ -111,7 +111,7 @@ export function PortraitEditor() {
         </div>
         <div className="method-note">
           <span>01</span>
-          <p><strong>AI portrait transfer.</strong> DGPST separates source structure from reference appearance, then synthesizes a controlled result with diffusion.</p>
+          <p><strong>AI portrait transfer.</strong> InstantStyle keeps your face and pose from the photo, then paints the lighting, palette, and finish of the reference portrait on top with diffusion.</p>
         </div>
       </section>
 

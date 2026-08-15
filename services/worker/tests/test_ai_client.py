@@ -51,8 +51,10 @@ def test_transfer_uses_explicit_content_and_style_multipart_roles() -> None:
             content=content,
             headers={
                 "Content-Type": "image/png",
-                "X-Portrait-Engine": "ai_dgpst_v1",
-                "X-Portrait-Diagnostics": _diagnostics_header({"model": "DGPST", "seed": 17}),
+                "X-Portrait-Engine": "ai_instantstyle_v1",
+                "X-Portrait-Diagnostics": _diagnostics_header(
+                    {"model": "InstantStyle", "seed": 17}
+                ),
             },
         )
 
@@ -69,8 +71,8 @@ def test_transfer_uses_explicit_content_and_style_multipart_roles() -> None:
 
     assert observed["body"].find(content) < observed["body"].find(style)
     assert response.image_png == content
-    assert response.engine_id == "ai_dgpst_v1"
-    assert response.diagnostics == {"model": "DGPST", "seed": 17}
+    assert response.engine_id == "ai_instantstyle_v1"
+    assert response.diagnostics == {"model": "InstantStyle", "seed": 17}
     assert api_token not in repr(client)
     with pytest.raises(TypeError):
         client.transfer(content, style, {})  # type: ignore[misc]
@@ -112,7 +114,7 @@ def test_transfer_preserves_bounded_jpeg_upload_representation() -> None:
         return httpx.Response(
             200,
             content=_png((1, 2, 3)),
-            headers={"Content-Type": "image/png", "X-Portrait-Engine": "ai_dgpst_v1"},
+            headers={"Content-Type": "image/png", "X-Portrait-Engine": "ai_instantstyle_v1"},
         )
 
     client = AIEngineClient(base_url="http://engine.test", transport=httpx.MockTransport(handler))
@@ -130,7 +132,7 @@ def test_transfer_preserves_bounded_jpeg_upload_representation() -> None:
         (
             {
                 "Content-Type": "image/png",
-                "X-Portrait-Engine": "ai_dgpst_v1",
+                "X-Portrait-Engine": "ai_instantstyle_v1",
                 "X-Portrait-Diagnostics": "not+valid+base64",
             },
             "invalid diagnostics",

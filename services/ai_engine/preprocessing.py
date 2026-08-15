@@ -102,17 +102,17 @@ def restore_from_letterbox(
 
 
 def scale_short_side(
-    image: Image.Image, short_side: int, max_long_side: int
+    image: Image.Image, short_side: int, max_long_side: int, *, stride: int = 16
 ) -> tuple[Image.Image, ResizeTransform]:
-    """Match official DGPST short-side scaling with a local VRAM ceiling."""
+    """Scale the short side for inference while capping the long side for VRAM."""
 
     original_width, original_height = image.size
     scale = min(
         short_side / min(original_width, original_height),
         max_long_side / max(original_width, original_height),
     )
-    width = max(16, int(round((original_width * scale) / 16.0)) * 16)
-    height = max(16, int(round((original_height * scale) / 16.0)) * 16)
+    width = max(stride, int(round((original_width * scale) / stride)) * stride)
+    height = max(stride, int(round((original_height * scale) / stride)) * stride)
     width = min(width, max_long_side)
     height = min(height, max_long_side)
     transform = ResizeTransform(

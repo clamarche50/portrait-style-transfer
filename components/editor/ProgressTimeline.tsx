@@ -7,16 +7,15 @@ const stages = [
   ["VALIDATING", "Validate"],
   ["FACE_LANDMARKS", "Map features"],
   ["SEGMENTATION", "Build matte"],
-  ["DENSE_ALIGNMENT", "Align portraits"],
-  ["MULTISCALE_TRANSFER", "Transfer style"],
+  ["AI_GENERATION", "Generate portrait"],
+  ["BACKGROUND", "Compose background"],
   ["POSTPROCESSING", "Finish"],
 ] as const;
 
 const stageRank: Record<string, number> = {
   VALIDATING: 0, DECODING: 0, FACE_LANDMARKS: 1, QUALITY_ANALYSIS: 1,
-  SEGMENTATION: 2, REFERENCE_SELECTION: 2, AFFINE_ALIGNMENT: 3,
-  PIECEWISE_ALIGNMENT: 3, DENSE_ALIGNMENT: 3, MULTISCALE_TRANSFER: 4,
-  EYE_HIGHLIGHTS: 4, BACKGROUND: 5, POSTPROCESSING: 5,
+  SEGMENTATION: 2, REFERENCE_SELECTION: 2, AI_GENERATION: 3,
+  BACKGROUND: 4, POSTPROCESSING: 5,
   UPLOADING_OUTPUT: 5, COMPLETED: 6,
 };
 
@@ -27,7 +26,7 @@ export function ProgressTimeline({ job }: { job: JobRecord }) {
       <div className="progress-card__heading">
         <div>
           <span className="eyebrow">Making your portrait</span>
-          <h2>{job.status === "SUCCEEDED" ? "Your finish is ready" : job.status === "FAILED" ? "Processing stopped" : "Transferring light, scale by scale"}</h2>
+          <h2>{job.status === "SUCCEEDED" ? "Your finish is ready" : job.status === "FAILED" ? "Processing stopped" : "Generating your styled portrait"}</h2>
         </div>
         <strong>{Math.round(job.progress)}%</strong>
       </div>

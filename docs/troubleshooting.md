@@ -4,8 +4,8 @@
 
 Inspect both `GET /api/v1/health/ready` and the internal AI service's
 `GET /health/ready`. API readiness covers PostgreSQL, Redis, object storage,
-buckets, and MediaPipe assets. AI readiness covers the complete DGPST manifest,
-CUDA availability, and model initialization. Readiness never downloads weights.
+buckets, and MediaPipe assets. AI readiness covers the complete InstantStyle
+manifest, CUDA availability, and model initialization. Readiness never downloads weights.
 
 Run the offline checks first:
 
@@ -15,16 +15,16 @@ docker compose config --quiet
 docker compose run --rm ai-engine python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name())"
 ```
 
-## DGPST model provisioning fails
+## InstantStyle model provisioning fails
 
-The tree contains 19 pinned files and occupies about 8.3 GiB. Confirm sufficient
-disk space and access to the official Hugging Face repositories and the Google
-Drive folder linked by DGPST. Partial downloads never replace a valid artifact.
-If a source changes bytes, do not weaken verification: review provenance and
-licensing, then update the manifest deliberately.
+The tree contains the SDXL base, IP-Adapter, FaceID, and InsightFace artifacts
+and occupies about 13 GiB. Confirm sufficient disk space and access to the
+official Hugging Face repositories. Partial downloads never replace a valid
+artifact. If a source changes bytes, do not weaken verification: review
+provenance and licensing, then update the manifest deliberately.
 
 Air-gapped deployments must pre-provision the files and run
-`python scripts/provision_dgpst_models.py --verify-only` before starting Compose.
+`python scripts/provision_instantstyle_models.py --verify-only` before starting Compose.
 
 ## AI service cannot see the GPU
 
@@ -54,8 +54,7 @@ making progress, and keep `WORKER_TASK_TIME_LIMIT_SECONDS` safely above it.
 
 The `worker-cpu` queue worker orchestrates the internal GPU sidecar. Check that
 it consumes `portrait-cpu`, Redis URLs match, `ai-engine` is healthy, concurrency
-quota permits work, and the job has not expired or been cancelled. The optional
-`worker-gpu` profile is legacy dense-alignment tooling and does not run DGPST.
+quota permits work, and the job has not expired or been cancelled.
 
 ## Job fails portrait validation
 
@@ -66,8 +65,8 @@ inputs instead of presenting an unreliable result.
 
 ## Identity, hair, glasses, or background changed
 
-DGPST is generative; structure conditioning reduces but does not eliminate
-identity drift. Increase structure strength, reduce style strength, and use a
+InstantStyle is generative; the FaceID identity adapter reduces but does not
+eliminate identity drift. Increase structure strength, reduce style strength, and use a
 reference with similar pose, framing, hair silhouette, and eyewear. Review the
 full image before use. Background modes are applied after generation, but a
 subject boundary can still be imperfect.
@@ -78,13 +77,6 @@ Record the same input/reference bytes, model-manifest hashes, profile,
 `random_seed`, strengths, inference steps, container revision, GPU/PyTorch
 runtime, and output settings. A seed improves repeatability but does not promise
 byte-identical results across different GPU or dependency versions.
-
-## Reference extraction refuses a path
-
-This is a security feature of the legacy research-workspace importer. It rejects
-absolute paths, traversal, Windows device names, duplicates, symlink traversal,
-and existing destinations unless overwrite is explicit. Never compile or run
-the extracted 2014 archive.
 
 ## Compose cannot bind ports or trust TLS
 

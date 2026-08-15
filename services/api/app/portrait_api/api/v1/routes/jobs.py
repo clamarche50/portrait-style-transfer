@@ -21,7 +21,6 @@ from portrait_api.dependencies import (
 from portrait_api.errors import AppError
 from portrait_api.metrics import JOBS, STORAGE_ERRORS
 from portrait_api.models import (
-    AlgorithmProfile,
     ArtifactKind,
     AssetKind,
     Job,
@@ -103,8 +102,6 @@ def _event(job: Job, message: str) -> dict[str, object]:
 
 def _enqueue(job: Job, queue: TaskQueue, config: Settings) -> str:
     # The CPU Celery worker orchestrates the isolated GPU inference sidecar.
-    # Routing this task to the legacy in-process GPU queue would strand jobs
-    # whenever ENABLE_GPU is set for unrelated dense-alignment tooling.
     del config
     return queue.enqueue_transfer(str(job.id), use_gpu=False)
 
@@ -469,14 +466,6 @@ def save_corrections(
     if job.status not in TERMINAL_JOB_STATUSES or job.status == JobStatus.EXPIRED:
         raise AppError("JOB_NOT_EDITABLE", "Corrections require a completed or failed job.", 409)
     new_corrections = [item.model_dump(mode="json") for item in payload.corrections]
-    ai_job = job.algorithm_profile == AlgorithmProfile.AI_DGPST_V1
-    if ai_job and any(correction.get("type") != "background" for correction in new_corrections):
-        raise AppError(
-            "AI_CORRECTION_UNSUPPORTED",
-            "AI jobs support background corrections only; "
-            "create a new job to change transfer controls.",
-            422,
-        )
     combined = [*(job.corrections or []), *new_corrections]
     if len(combined) > 256:
         raise AppError("TOO_MANY_CORRECTIONS", "Too many correction operations were supplied.", 422)
@@ -493,37 +482,21 @@ def save_corrections(
     )
     diagnostics = dict(job.diagnostics or {})
     manifest = diagnostics.get("private_cache_manifest", {})
-    invalidated_stage_names = {stage.value for stage in plan.invalidated_stages}
-    retained_manifest: dict[str, object] = {}
+    # The AI engine reruns end to end, so no cached stage output survives.
     if isinstance(manifest, dict):
-        for name, metadata in manifest.items():
-            if not isinstance(metadata, dict):
-                continue
-            if metadata.get("stage") in invalidated_stage_names:
-                key = metadata.get("key")
-                if isinstance(key, str):
-                    storage.delete(key)
-            else:
-                retained_manifest[str(name)] = metadata
-    if ai_job:
-        for metadata in retained_manifest.values():
+        for metadata in manifest.values():
             if not isinstance(metadata, dict):
                 continue
             key = metadata.get("key")
             if isinstance(key, str):
                 storage.delete(key)
-        retained_manifest = {}
-        storage.delete_prefix(f"jobs/{job.id}/cache/")
-    for invalidated_stage in plan.invalidated_stages:
-        storage.delete_prefix(f"jobs/{job.id}/cache/{invalidated_stage.value.lower()}/")
-    diagnostics["private_cache_manifest"] = retained_manifest
+    storage.delete_prefix(f"jobs/{job.id}/cache/")
+    diagnostics["private_cache_manifest"] = {}
     diagnostics["cache_invalidation"] = {
-        "resume_from_stage": (
-            ProcessingStage.VALIDATING.value if ai_job else plan.earliest_stage.value
-        ),
+        "resume_from_stage": ProcessingStage.VALIDATING.value,
         "invalidated_stages": [stage.value for stage in plan.invalidated_stages],
         "correction_hash": plan.correction_hash,
-        "full_ai_rerun": ai_job,
+        "full_ai_rerun": True,
     }
     job.corrections = combined
     job.diagnostics = diagnostics
@@ -550,17 +523,9 @@ async def rerun_job(
         raise AppError("JOB_QUOTA_EXCEEDED", "The concurrent job quota has been reached.", 429)
     _delete_job_artifacts(request, db, job, storage)
     diagnostics = dict(job.diagnostics or {})
-    invalidation = diagnostics.get("cache_invalidation", {})
-    cache_manifest = diagnostics.get("private_cache_manifest", {})
-    ai_job = job.algorithm_profile == AlgorithmProfile.AI_DGPST_V1
-    resume_stage = (
-        ProcessingStage.VALIDATING.value
-        if ai_job
-        else invalidation.get("resume_from_stage", ProcessingStage.VALIDATING.value)
-    )
     diagnostics["resume"] = {
-        "requested_stage": resume_stage,
-        "cache_reuse": not ai_job and isinstance(cache_manifest, dict) and bool(cache_manifest),
+        "requested_stage": ProcessingStage.VALIDATING.value,
+        "cache_reuse": False,
     }
     repository.reset_for_rerun(job, diagnostics=diagnostics)
     job.expires_at = datetime.now(UTC) + timedelta(hours=config.asset_ttl_hours)

@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
       default: "Portrait Studio — AI portrait style transfer",
       template: "%s · Portrait Studio",
     },
-    description: "Guide a headshot's color, lighting, and texture with a reference portrait using DGPST. Review every AI-generated edit for likeness changes.",
+    description: "Guide a headshot's color, lighting, and texture with a reference portrait using InstantStyle. Review every AI-generated edit for likeness changes.",
     openGraph: {
       title: "Portrait Studio",
       description: "Move the light. Shape the finish. Review the AI-generated result.",

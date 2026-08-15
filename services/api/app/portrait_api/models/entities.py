@@ -142,7 +142,8 @@ class Job(Base):
         ForeignKey("style_examples.id", ondelete="SET NULL")
     )
     algorithm_profile: Mapped[AlgorithmProfile] = mapped_column(
-        enum_type(AlgorithmProfile, "algorithm_profile"), default=AlgorithmProfile.AI_DGPST_V1
+        enum_type(AlgorithmProfile, "algorithm_profile"),
+        default=AlgorithmProfile.AI_INSTANTSTYLE_V1,
     )
     settings: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     corrections: Mapped[list[dict[str, Any]] | None] = mapped_column(JsonType)

@@ -1,18 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.12.10-slim-bookworm@sha256:fd95fa221297a88e1cf49c55ec1828edd7c5a428187e67b5d1805692d11588db AS dgpst-source
-
-ARG DGPST_COMMIT=aada535bde5b87f9ece9a4af1c0628a93f46a342
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates git \
-    && git clone --filter=blob:none --no-checkout https://github.com/wangxb29/DGPST.git /opt/dgpst \
-    && git -C /opt/dgpst checkout --detach "${DGPST_COMMIT}" \
-    && test "$(git -C /opt/dgpst rev-parse HEAD)" = "${DGPST_COMMIT}" \
-    && rm -rf /opt/dgpst/.git /var/lib/apt/lists/*
-
 FROM python:3.12.10-slim-bookworm@sha256:fd95fa221297a88e1cf49c55ec1828edd7c5a428187e67b5d1805692d11588db AS runtime
 
-ARG DGPST_COMMIT=aada535bde5b87f9ece9a4af1c0628a93f46a342
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -22,13 +11,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/tmp/.cache \
     HF_HOME=/tmp/huggingface \
     TORCH_HOME=/tmp/torch \
-    MPLCONFIGDIR=/tmp/matplotlib \
     CUDA_MODULE_LOADING=LAZY \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    PYTHONPATH=/app:/opt/dgpst \
-    DGPST_SOURCE_COMMIT=${DGPST_COMMIT}
+    PYTHONPATH=/app
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends libgomp1 \
@@ -39,17 +26,27 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY services/ai_engine/requirements.txt /app/services/ai_engine/requirements.txt
+# insightface is installed first with --no-deps and stays out of
+# requirements.txt: its declared opencv-python dependency conflicts with the
+# headless OpenCV build pinned in requirements. That one skipped metadata
+# requirement is then removed from its dist-info so `pip check` remains an
+# honest consistency gate (its other imports, including onnx, are pinned in
+# requirements.txt).
+RUN python -m pip install --no-deps insightface==1.0.1 \
+    && sed -E -i \
+        -e '/^Requires-Dist: opencv-python/d' \
+        /usr/local/lib/python3.12/site-packages/insightface-1.0.1.dist-info/METADATA
+
 RUN python -m pip install \
         --index-url "${PYTORCH_INDEX_URL}" \
         torch==2.10.0 \
-        torchvision==0.25.0 \
-    && python -m pip install -r /app/services/ai_engine/requirements.txt
+        torchvision==0.25.0
 
-COPY --from=dgpst-source /opt/dgpst /opt/dgpst
+RUN python -m pip install -r /app/services/ai_engine/requirements.txt
+
 COPY services/ai_engine /app/services/ai_engine
 RUN python -m pip check \
-    && python -m services.ai_engine.patch_upstream /opt/dgpst \
-    && python -c "from ip_adapter.ip_adapter_control import IPAdapter2; from models.DGPST_model import DGPSTModel, WavePool, WaveUnpool; from models.networks.dift_sd import MyUNet2DConditionModel; from models.pipeline_dgpst import DGPSTPipeline; from src.config import RunConfig; from src.eunms import Model_Type, Scheduler_Type; from src.schedulers.ddim_scheduler import MyDDIMScheduler" \
+    && python -c "import diffusers, insightface, peft, transformers; import services.ai_engine.app" \
     && chown -R app:app /app
 
 USER app

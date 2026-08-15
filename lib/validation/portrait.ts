@@ -10,7 +10,7 @@ export const portraitFileSchema = z
   .refine((file) => file.size <= MAX_UPLOAD_BYTES, "Choose an image smaller than 15 MB.");
 
 export const settingsSchema = z.object({
-  algorithm_profile: z.literal("ai_dgpst_v1"),
+  algorithm_profile: z.literal("ai_instantstyle_v1"),
   style_strength: z.number().min(0).max(1),
   structure_strength: z.number().min(0).max(1),
   inference_steps: z.number().int().min(10).max(50),
@@ -29,7 +29,7 @@ export const settingsSchema = z.object({
 });
 
 export const defaultSettings: TransferSettings = {
-  algorithm_profile: "ai_dgpst_v1",
+  algorithm_profile: "ai_instantstyle_v1",
   style_strength: 0.75,
   structure_strength: 0.9,
   inference_steps: 30,
