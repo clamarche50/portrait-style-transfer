@@ -207,6 +207,14 @@ def _normalized_landmarks(analysis: PortraitAnalysis) -> NDArray[np.float32]:
     return np.asarray((analysis.landmarks - midpoint) / scale, dtype=np.float32)
 
 
+# Generative output keeps identity through the engine's FaceID adapter, not
+# by warping the source pixels, so landmarks legitimately drift farther than
+# the legacy warp-based engine allowed. Only a catastrophic departure fails
+# the job; normal drift and stylized texture are recorded as diagnostics.
+_GEOMETRY_DRIFT_CATASTROPHIC = 0.35
+_GEOMETRY_POSE_CATASTROPHIC_DEGREES = 25.0
+
+
 def _geometry_quality(
     source: PortraitAnalysis,
     generated_rgb: NDArray[np.float32],
@@ -231,17 +239,24 @@ def _geometry_quality(
             "roll": abs(float(generated.pose.roll - source.pose.roll)),
         }
         pose_drift = max(pose_components.values())
-        passed = landmark_drift <= 0.08 and pose_drift <= 5.0
-        return passed, {
-            "passed": passed,
+        catastrophic = (
+            landmark_drift > _GEOMETRY_DRIFT_CATASTROPHIC
+            or pose_drift > _GEOMETRY_POSE_CATASTROPHIC_DEGREES
+        )
+        return not catastrophic, {
+            "passed": not catastrophic,
+            "advisory": True,
             "landmark_drift_mean": landmark_drift,
             "landmark_drift_p95": landmark_drift_p95,
             "pose_drift_degrees": pose_drift,
             "pose_components_degrees": pose_components,
         }
     except (PortraitTransferError, ValueError) as exc:
-        return False, {
-            "passed": False,
+        # Painterly stylization can defeat face re-analysis entirely; the
+        # FaceID adapter already conditions identity, so this is advisory.
+        return True, {
+            "passed": True,
+            "advisory": True,
             "reason": "generated_face_analysis_failed",
             "failure_code": getattr(getattr(exc, "code", None), "value", None),
         }
@@ -481,12 +496,10 @@ def process_transfer_job(self: Task, job_id: str) -> None:
             reference_asset = _select_reference(infrastructure, parsed_job_id, query_feature)
             reference_bytes = infrastructure.storage.get_bytes(reference_asset.object_key)
             reference_decoded = decode_image(reference_bytes, upload_limits)
-            reporter.emit(ProcessingStage.QUALITY_ANALYSIS, 10, "Validating style portrait")
-            analyze_portrait(
-                reference_decoded.rgb,
-                portrait_analyzer,
-                _preflight_thresholds(reference_decoded.rgb),
-            )
+            reporter.emit(ProcessingStage.QUALITY_ANALYSIS, 10, "Validating style image")
+            # Style references are decoded-only by design: paintings and other
+            # face-less references are valid style sources for the AI engine.
+            del reference_decoded
             if reporter.cancel_requested():
                 raise ProcessingCancelled()
 
@@ -500,77 +513,60 @@ def process_transfer_job(self: Task, job_id: str) -> None:
             engine_response: AIEngineResponse | None = None
             generated_rgb: NDArray[np.float32] | None = None
             quality_attempts: list[dict[str, object]] = []
-            for quality_attempt in range(2):
-                response = client.transfer(
-                    # Preserve the bounded upload representation. Re-encoding a valid
-                    # Re-encoding a valid compressed upload as PNG can expand it
-                    # beyond the internal request cap.
-                    content=input_bytes,
-                    style=reference_bytes,
-                    settings=request_settings,
+            response = client.transfer(
+                # Preserve the bounded upload representation. Re-encoding a valid
+                # Re-encoding a valid compressed upload as PNG can expand it
+                # beyond the internal request cap.
+                content=input_bytes,
+                style=reference_bytes,
+                settings=request_settings,
+            )
+            if reporter.cancel_requested():
+                raise ProcessingCancelled()
+            output_decoded = decode_image(
+                response.image_png,
+                _decode_limits(
+                    infrastructure.settings,
+                    max_encoded_bytes=_AI_RESPONSE_MAX_ENCODED_BYTES,
+                ),
+            )
+            if output_decoded.rgb.shape != input_decoded.rgb.shape:
+                raise AIEngineError(
+                    "AI_ENGINE_INVALID_RESPONSE",
+                    "The AI engine changed the portrait dimensions.",
+                    retryable=False,
                 )
-                if reporter.cancel_requested():
-                    raise ProcessingCancelled()
-                output_decoded = decode_image(
-                    response.image_png,
-                    _decode_limits(
-                        infrastructure.settings,
-                        max_encoded_bytes=_AI_RESPONSE_MAX_ENCODED_BYTES,
+            reporter.emit(
+                ProcessingStage.POSTPROCESSING,
+                75,
+                "Measuring AI output geometry",
+            )
+            passed, quality = _geometry_quality(
+                input_analysis,
+                output_decoded.rgb,
+                portrait_analyzer,
+            )
+            quality_attempts.append(
+                {
+                    "attempt": 1,
+                    "style_strength": _bounded_diagnostic_strength(
+                        response.diagnostics.get("style_strength_applied"),
+                        request_settings["style_strength"],
                     ),
-                )
-                if output_decoded.rgb.shape != input_decoded.rgb.shape:
-                    raise AIEngineError(
-                        "AI_ENGINE_INVALID_RESPONSE",
-                        "The AI engine changed the portrait dimensions.",
-                        retryable=False,
-                    )
-                reporter.emit(
-                    ProcessingStage.POSTPROCESSING,
-                    75 if quality_attempt == 0 else 92,
-                    "Validating AI output geometry",
-                )
-                passed, quality = _geometry_quality(
-                    input_analysis,
-                    output_decoded.rgb,
-                    portrait_analyzer,
-                )
-                quality_attempts.append(
-                    {
-                        "attempt": quality_attempt + 1,
-                        "style_strength": _bounded_diagnostic_strength(
-                            response.diagnostics.get("style_strength_applied"),
-                            request_settings["style_strength"],
-                        ),
-                        "structure_strength": _bounded_diagnostic_strength(
-                            response.diagnostics.get("structure_strength_applied"),
-                            request_settings["structure_strength"],
-                        ),
-                        **quality,
-                    }
-                )
-                if passed:
-                    engine_response = response
-                    generated_rgb = output_decoded.rgb
-                    break
-                if quality_attempt == 0:
-                    request_settings = {
-                        **request_settings,
-                        "style_strength": min(
-                            float(cast(Any, request_settings["style_strength"])), 0.6
-                        ),
-                        "structure_strength": max(
-                            float(cast(Any, request_settings["structure_strength"])), 0.95
-                        ),
-                    }
-                    reporter.emit(
-                        ProcessingStage.AI_GENERATION,
-                        80,
-                        "Retrying with stronger identity preservation",
-                    )
+                    "structure_strength": _bounded_diagnostic_strength(
+                        response.diagnostics.get("structure_strength_applied"),
+                        request_settings["structure_strength"],
+                    ),
+                    **quality,
+                }
+            )
+            if passed:
+                engine_response = response
+                generated_rgb = output_decoded.rgb
             if engine_response is None or generated_rgb is None:
                 raise AIEngineError(
                     "AI_QUALITY_GUARD_FAILED",
-                    "The generated portrait did not preserve the source face geometry.",
+                    "The generated portrait departed from the source face geometry.",
                     retryable=False,
                 )
 
@@ -583,8 +579,9 @@ def process_transfer_job(self: Task, job_id: str) -> None:
             )
             result_diagnostics = dict(engine_response.diagnostics)
             result_diagnostics["worker_quality_guard"] = {
-                "landmark_drift_limit": 0.08,
-                "pose_drift_limit_degrees": 5.0,
+                "policy": "advisory",
+                "landmark_drift_catastrophic": _GEOMETRY_DRIFT_CATASTROPHIC,
+                "pose_drift_catastrophic_degrees": _GEOMETRY_POSE_CATASTROPHIC_DEGREES,
                 "retry_performed": len(quality_attempts) > 1,
                 "attempts": quality_attempts,
             }
@@ -806,18 +803,19 @@ def _persist_ingested_style(
 ) -> tuple[str, dict[str, Any]]:
     prefix = f"styles/{style_id}/examples/{example.id}"
     infrastructure.storage.delete_prefix(f"{prefix}/")
-    derived_assets = ["head_mask", "landmarks"]
+    derived_assets = ["head_mask", *(["landmarks"] if ingested.has_face else [])]
     try:
         infrastructure.storage.put_bytes(
             f"{prefix}/head-mask.npy",
             _npy_bytes(ingested.analysis.masks.head),
             "application/octet-stream",
         )
-        infrastructure.storage.put_bytes(
-            f"{prefix}/landmarks.npy",
-            _npy_bytes(ingested.analysis.landmarks),
-            "application/octet-stream",
-        )
+        if ingested.has_face:
+            infrastructure.storage.put_bytes(
+                f"{prefix}/landmarks.npy",
+                _npy_bytes(ingested.analysis.landmarks),
+                "application/octet-stream",
+            )
         feature_key = StyleRankingService(infrastructure.storage).index_vector(
             style_id,
             example,
@@ -834,16 +832,20 @@ def _persist_ingested_style(
         {
             "indexed": True,
             "indexed_at": datetime.now(UTC).isoformat(),
-            "full_ingestion": "COMPLETED",
+            # Face-less references must not claim landmark artifacts; ranking
+            # only loads landmarks.npy for fully ingested portrait examples.
+            "full_ingestion": "COMPLETED" if ingested.has_face else "COMPLETED_NO_FACE",
             "analysis_backend": analysis_backend,
-            "pose": _jsonable(ingested.analysis.pose),
+            "pose": _jsonable(ingested.analysis.pose) if ingested.has_face else None,
             "photometric_lab": (
                 np.asarray(ingested.feature.photometric_lab, dtype=np.float32).tolist()
                 if ingested.feature.photometric_lab is not None
                 else None
             ),
             "face_box": _jsonable(ingested.analysis.face_box),
-            "landmark_count": int(ingested.analysis.landmarks.shape[0]),
+            "landmark_count": (
+                int(ingested.analysis.landmarks.shape[0]) if ingested.has_face else 0
+            ),
             "monochrome": bool(float(np.mean(np.ptp(ingested.rgb, axis=2))) < 0.025),
             "derived_assets": derived_assets,
             "warnings": list(

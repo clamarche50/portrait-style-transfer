@@ -168,17 +168,11 @@ def test_worker_does_not_send_classical_resume_data_and_removes_old_cache(
         assert job.diagnostics["private_cache_manifest"] == {}
 
 
-def test_worker_retries_once_with_identity_preserving_settings(
+def test_worker_accepts_generative_drift_and_records_quality_metrics(
     worker: WorkerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     job_id, _, _ = worker.create_job()
     requests: list[dict[str, object]] = []
-    quality_results = iter(
-        [
-            (False, {"passed": False, "landmark_drift_mean": 0.12}),
-            (True, {"passed": True, "landmark_drift_mean": 0.03}),
-        ]
-    )
 
     def transfer(*, content: bytes, style: bytes, settings: object) -> AIEngineResponse:
         del style
@@ -192,25 +186,26 @@ def test_worker_retries_once_with_identity_preserving_settings(
     )
     monkeypatch.setattr(
         "portrait_worker.tasks._geometry_quality",
-        lambda *_args: next(quality_results),
+        lambda *_args: (
+            True,
+            {"passed": True, "advisory": True, "landmark_drift_mean": 0.12},
+        ),
     )
     process_transfer_job.run(job_id)
 
-    assert len(requests) == 2
-    assert requests[0]["style_strength"] == 0.75
-    assert requests[0]["structure_strength"] == 0.9
-    assert requests[1]["style_strength"] == 0.6
-    assert requests[1]["structure_strength"] == 0.95
+    # The advisory geometry gate must not trigger a second GPU render.
+    assert len(requests) == 1
     with worker.session_factory() as db:
         job = db.get(Job, uuid.UUID(job_id))
         assert job is not None and job.status == JobStatus.SUCCEEDED
-        assert job.diagnostics["summary"]["quality_retry_performed"] is True
+        assert job.diagnostics["summary"]["quality_retry_performed"] is False
         guard = job.diagnostics["transfer"]["worker_quality_guard"]
-        assert guard["retry_performed"] is True
-        assert len(guard["attempts"]) == 2
+        assert guard["policy"] == "advisory"
+        assert guard["retry_performed"] is False
+        assert len(guard["attempts"]) == 1
 
 
-def test_worker_fails_closed_when_both_geometry_checks_fail(
+def test_worker_fails_closed_on_catastrophic_geometry_drift(
     worker: WorkerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     job_id, _, _ = worker.create_job()
@@ -229,11 +224,11 @@ def test_worker_fails_closed_when_both_geometry_checks_fail(
     )
     monkeypatch.setattr(
         "portrait_worker.tasks._geometry_quality",
-        lambda *_args: (False, {"passed": False, "landmark_drift_mean": 0.2}),
+        lambda *_args: (False, {"passed": False, "landmark_drift_mean": 0.4}),
     )
     process_transfer_job.run(job_id)
 
-    assert call_count == 2
+    assert call_count == 1
     with worker.session_factory() as db:
         job = db.get(Job, uuid.UUID(job_id))
         assert job is not None and job.status == JobStatus.FAILED

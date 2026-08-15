@@ -99,26 +99,39 @@ class InstantStyleBackend:
         )
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
         # InstantStyle injects style through two attention layers only; the
-        # FaceID PlusV2 adapter preserves the subject's identity.
+        # FaceID PlusV2 adapter preserves the subject's identity. Both
+        # adapters must be registered in a single call: loading them
+        # sequentially rebuilds the projection container from the last call
+        # only, leaving the FaceID layer missing.
         pipe.load_ip_adapter(
-            str(model_root / "ip-adapter"),
-            subfolder="sdxl_models",
-            weight_name="ip-adapter_sdxl.safetensors",
+            [str(model_root / "ip-adapter"), str(model_root / "faceid")],
+            subfolder=["sdxl_models", None],
+            weight_name=[
+                "ip-adapter_sdxl.safetensors",
+                "ip-adapter-faceid-plusv2_sdxl.bin",
+            ],
             image_encoder_folder=None,
         )
-        pipe.load_ip_adapter(
-            str(model_root / "faceid"),
-            subfolder=None,
-            weight_name="ip-adapter-faceid-plusv2_sdxl.bin",
-            image_encoder_folder=None,
+        projection = getattr(pipe.unet, "encoder_hid_proj", None)
+        layers = (
+            getattr(projection, "image_projection_layers", None) if projection else None
         )
+        if not layers or len(layers) != 2:
+            raise EngineFailure(
+                "AI_ADAPTER_LOAD_FAILED",
+                "The style and identity adapters could not be attached to the model",
+            )
+        # fp16 keeps both encoders inside the container memory budget; they
+        # are moved to the GPU per-module by enable_model_cpu_offload anyway.
         style_clip = CLIPVisionModelWithProjection.from_pretrained(
             str(model_root / "ip-adapter" / "sdxl_models" / "image_encoder"),
             local_files_only=True,
+            torch_dtype=self.dtype,
         ).eval()
         face_clip = CLIPVisionModelWithProjection.from_pretrained(
             str(model_root / "ip-adapter" / "models" / "image_encoder"),
             local_files_only=True,
+            torch_dtype=self.dtype,
         ).eval()
         pipe.enable_vae_slicing()
         pipe.enable_vae_tiling()
@@ -126,6 +139,20 @@ class InstantStyleBackend:
         # Keeps the RTX worker inside 12GB of VRAM by staging UNet/text
         # encoder/VAE transfers to the GPU only while they run.
         pipe.enable_model_cpu_offload()
+        # Safetensors weights are memory-mapped lazily; the first inference
+        # would otherwise fault every weight page into the container cgroup
+        # in one burst, outpacing reclaim and tripping the OOM kill. Fault
+        # them in gradually here, during warmup, where reclaim keeps up.
+        for module in (
+            pipe.unet,
+            pipe.text_encoder,
+            pipe.text_encoder_2,
+            pipe.vae,
+            style_clip,
+            face_clip,
+        ):
+            for parameter in module.parameters():
+                parameter.data.sum()
         torch.cuda.empty_cache()
         gc.collect()
         return pipe, style_clip, face_clip
@@ -153,11 +180,13 @@ class InstantStyleBackend:
         torch = self.torch
         inputs = self.style_clip_processor(images=style, return_tensors="pt")
         with torch.inference_mode():
-            hidden = self.style_clip(**inputs, output_hidden_states=True).hidden_states[
-                -2
-            ]
-        embeds = torch.cat([torch.zeros_like(hidden), hidden], dim=0).unsqueeze(1)
-        return embeds.to(device="cuda", dtype=self.dtype)
+            # The InstantStyle adapter projection consumes the bigG encoder's
+            # pooled 1280-d embeddings, not its token hidden states.
+            pooled = self.style_clip(**inputs).image_embeds
+        embeds = torch.cat([torch.zeros_like(pooled), pooled], dim=0)
+        # The pipeline input check requires 3D/4D embeds; the projection
+        # flattens this token axis anyway.
+        return embeds.unsqueeze(1).to(device="cuda", dtype=self.dtype)
 
     def _faceid_embeds(self, content: Image.Image, face: Any) -> tuple[Any, Any]:
         from .faceid import FaceIdentityExtractor
@@ -209,18 +238,29 @@ class InstantStyleBackend:
             with torch.inference_mode():
                 style_embeds = self._style_embeds(style)
                 id_embeds, clip_embeds = self._faceid_embeds(content, face)
-                faceid_projection = (
-                    self.pipe.unet.encoder_hid_proj.image_projection_layers[1]
+                projection = getattr(self.pipe.unet, "encoder_hid_proj", None)
+                layers = (
+                    getattr(projection, "image_projection_layers", [])
+                    if projection
+                    else []
                 )
+                if len(layers) != 2:
+                    raise EngineFailure(
+                        "AI_ADAPTER_LOAD_FAILED",
+                        "The style and identity adapters are not attached to the model",
+                    )
+                faceid_projection = layers[1]
                 faceid_projection.clip_embeds = clip_embeds
                 faceid_projection.shortcut = False
                 # InstantStyle keeps style inside down.block_2 / up.block_0 so
-                # identity-critical layers stay untouched.
+                # identity-critical layers stay untouched. SDXL's up.block_0
+                # owns three attention layers, so the middle (paper injection
+                # site) gets the scale while its neighbours stay disabled.
                 self.pipe.set_ip_adapter_scale(
                     [
                         {
                             "down": {"block_2": [0.0, style_scale]},
-                            "up": {"block_0": [style_scale, 0.0]},
+                            "up": {"block_0": [0.0, style_scale, 0.0]},
                         },
                         faceid_scale,
                     ]
@@ -248,6 +288,10 @@ class InstantStyleBackend:
                 retryable=True,
             ) from exc
         finally:
+            # Release the caching allocator's pooled blocks: on WSL2 the
+            # reserved GPU segments are charged to the container cgroup, and
+            # holding them between requests trips the container memory limit.
+            torch.cuda.empty_cache()
             gc.collect()
         elapsed = time.perf_counter() - started
         peak = max(before_peak, torch.cuda.max_memory_allocated())

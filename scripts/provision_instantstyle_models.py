@@ -63,6 +63,9 @@ _SDXL_FILES = (
 )
 
 _IP_ADAPTER_FILES = (
+    # The diffusers InstantStyle recipe pairs this adapter with the bigG
+    # image encoder below; its projection consumes the encoder's pooled
+    # 1280-d embeddings.
     "sdxl_models/ip-adapter_sdxl.safetensors",
     "sdxl_models/image_encoder/config.json",
     "sdxl_models/image_encoder/model.safetensors",

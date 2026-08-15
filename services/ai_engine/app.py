@@ -139,8 +139,11 @@ async def transfer(
     except Exception:
         LOGGER.exception("Unhandled InstantStyle inference failure")
         return _error(
+            # Deterministic crashes retry with the identical tensors and
+            # inputs, so retrying only loops until exhaustion. Surface the
+            # failure immediately and let the user fix the input or config.
             EngineFailure(
-                "AI_INFERENCE_FAILED", "The AI engine failed safely", retryable=True
+                "AI_INFERENCE_FAILED", "The AI engine failed safely", retryable=False
             ),
             500,
         )
