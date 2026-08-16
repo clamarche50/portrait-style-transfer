@@ -84,3 +84,28 @@ Change host-side ports in a local override. The AI sidecar intentionally has no
 host port. `tls internal` uses Caddy's local CA; trust it for development or use
 the documented loopback HTTP endpoint. Production must use a publicly trusted
 issuer.
+
+## Vercel shows "The request could not be completed"
+
+The hosted frontend reaches the API only through the Cloudflare Tunnel
+(`compose.tunnel.yml`). When the local Docker stack restarts without that
+file, the `cloudflared` container is left stopped and every request from the
+deployed site fails at the network layer.
+
+Check and recover:
+
+```powershell
+docker ps -a --format "{{.Names}}: {{.Status}}" | Select-String cloudflared
+# If it is Exited, bring the tunnel back up:
+docker compose -f compose.yml -f compose.tunnel.yml up -d cloudflared
+docker logs --tail 20 portrait-style-transfer-cloudflared-1  # expect "Registered tunnel connection"
+```
+
+The tunnel secret lives in `.cloudflare-tunnel-token` (gitignored). If the
+repository folder was moved, restore that file from its previous location
+before recreating the container, or the secret mount fails.
+
+Cloudflare bot protection can return error 1010 to non-browser HTTP clients
+such as scripts; real browsers are unaffected, so verify the tunnel with a
+browser request to `https://api-portrait.cyberchords.app/api/v1/health/ready`
+rather than a script.
