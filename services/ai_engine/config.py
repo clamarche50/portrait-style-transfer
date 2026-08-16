@@ -37,6 +37,12 @@ class ServiceConfig:
     guidance_scale: float
     style_scale_limit: float
     faceid_scale_limit: float
+    controlnet_scale: float
+    img2img_base_strength: float
+    img2img_structure_weight: float
+    palette_blend: float
+    identity_repair_below: float
+    identity_fail_below: float
     prompt: str
     negative_prompt: str
 
@@ -59,6 +65,30 @@ class ServiceConfig:
         faceid_scale_limit = float(os.getenv("ENGINE_FACEID_SCALE_LIMIT", "1.0"))
         if not 0.0 < style_scale_limit <= 1.0 or not 0.0 < faceid_scale_limit <= 1.0:
             raise ValueError("ENGINE scale limits must be within (0.0, 1.0]")
+        controlnet_scale = float(os.getenv("ENGINE_CONTROLNET_SCALE", "0.35"))
+        if not 0.0 <= controlnet_scale <= 1.0:
+            raise ValueError("ENGINE_CONTROLNET_SCALE must be within [0.0, 1.0]")
+        img2img_base_strength = float(os.getenv("ENGINE_IMG2IMG_BASE_STRENGTH", "0.65"))
+        img2img_structure_weight = float(
+            os.getenv("ENGINE_IMG2IMG_STRUCTURE_WEIGHT", "0.20")
+        )
+        if (
+            not 0.5 <= img2img_base_strength <= 0.95
+            or not 0.0 <= img2img_structure_weight <= 0.45
+        ):
+            raise ValueError(
+                "ENGINE_IMG2IMG_BASE_STRENGTH must be within [0.5, 0.95] and "
+                "ENGINE_IMG2IMG_STRUCTURE_WEIGHT within [0.0, 0.45]"
+            )
+        palette_blend = float(os.getenv("ENGINE_PALETTE_BLEND", "0.8"))
+        if not 0.0 <= palette_blend <= 1.0:
+            raise ValueError("ENGINE_PALETTE_BLEND must be within [0.0, 1.0]")
+        identity_repair_below = float(os.getenv("ENGINE_IDENTITY_REPAIR_BELOW", "0.45"))
+        identity_fail_below = float(os.getenv("ENGINE_IDENTITY_FAIL_BELOW", "0.30"))
+        if not 0.0 < identity_fail_below < identity_repair_below <= 1.0:
+            raise ValueError(
+                "ENGINE identity thresholds must satisfy 0 < fail < repair <= 1"
+            )
         return cls(
             model_root=model_root,
             manifest_path=Path(
@@ -78,7 +108,13 @@ class ServiceConfig:
             guidance_scale=guidance_scale,
             style_scale_limit=style_scale_limit,
             faceid_scale_limit=faceid_scale_limit,
-            prompt=os.getenv("ENGINE_PROMPT", "a high quality portrait photo"),
+            controlnet_scale=controlnet_scale,
+            img2img_base_strength=img2img_base_strength,
+            img2img_structure_weight=img2img_structure_weight,
+            palette_blend=palette_blend,
+            identity_repair_below=identity_repair_below,
+            identity_fail_below=identity_fail_below,
+            prompt=os.getenv("ENGINE_PROMPT", "a portrait of a person, high quality"),
             negative_prompt=os.getenv(
                 "ENGINE_NEGATIVE_PROMPT",
                 "lowres, blurry, deformed, distorted face, bad anatomy, "

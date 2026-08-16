@@ -30,7 +30,13 @@ def _config() -> ServiceConfig:
         guidance_scale=5.0,
         style_scale_limit=1.0,
         faceid_scale_limit=1.0,
-        prompt="a high quality portrait photo",
+        controlnet_scale=0.8,
+        img2img_base_strength=0.85,
+        img2img_structure_weight=0.25,
+        palette_blend=0.8,
+        identity_repair_below=0.45,
+        identity_fail_below=0.30,
+        prompt="a portrait of a person, high quality",
         negative_prompt="lowres",
     )
 

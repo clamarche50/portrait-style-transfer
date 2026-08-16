@@ -218,6 +218,25 @@
       "target_path": "ip-adapter-faceid-plusv2_sdxl.bin"
     },
     {
+      "path": "instantid/ControlNetModel/config.json",
+      "sha256": "2480c42f363d712faae8d0e17cb850a5d1e4cafc232fbd022b1d43eee45234eb",
+      "bytes": 1376,
+      "source": "https://huggingface.co/InstantX/InstantID",
+      "revision": "57b32dfee076092ad2930c71fd6d439c2c3b1820",
+      "source_path": "ControlNetModel/config.json",
+      "target_path": "ControlNetModel/config.json"
+    },
+    {
+      "path": "instantid/ControlNetModel/diffusion_pytorch_model.fp16.safetensors",
+      "sha256": "c8127be9f174101ebdafee9964d856b49b634435cf6daa396d3f593cf0bbbb05",
+      "bytes": 2502139136,
+      "source": "https://huggingface.co/InstantX/InstantID",
+      "revision": "57b32dfee076092ad2930c71fd6d439c2c3b1820",
+      "source_path": "ControlNetModel/diffusion_pytorch_model.safetensors",
+      "target_path": "ControlNetModel/diffusion_pytorch_model.fp16.safetensors",
+      "conversion": "fp16"
+    },
+    {
       "path": "insightface/models/buffalo_l/1k3d68.onnx",
       "sha256": "df5c06b8a0c12e422b2ed8947b8869faa4105387f199c477af038aa01f9a45cc",
       "bytes": 143607619,
@@ -261,6 +280,51 @@
       "revision": "33c1063c49c785b7652d3fd529f86fa4f149392b",
       "source_path": "models/buffalo_l/w600k_r50.onnx",
       "target_path": "models/buffalo_l/w600k_r50.onnx"
+    },
+    {
+      "path": "insightface/models/antelopev2/1k3d68.onnx",
+      "sha256": "df5c06b8a0c12e422b2ed8947b8869faa4105387f199c477af038aa01f9a45cc",
+      "bytes": 143607619,
+      "source": "https://huggingface.co/LPDoctor/insightface",
+      "revision": "25226b4048397eb2adc0fa5a3c21f416005fc228",
+      "source_path": "models/antelopev2/1k3d68.onnx",
+      "target_path": "models/antelopev2/1k3d68.onnx"
+    },
+    {
+      "path": "insightface/models/antelopev2/2d106det.onnx",
+      "sha256": "f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf",
+      "bytes": 5030888,
+      "source": "https://huggingface.co/LPDoctor/insightface",
+      "revision": "25226b4048397eb2adc0fa5a3c21f416005fc228",
+      "source_path": "models/antelopev2/2d106det.onnx",
+      "target_path": "models/antelopev2/2d106det.onnx"
+    },
+    {
+      "path": "insightface/models/antelopev2/genderage.onnx",
+      "sha256": "4fde69b1c810857b88c64a335084f1c3fe8f01246c9a191b48c7bb756d6652fb",
+      "bytes": 1322532,
+      "source": "https://huggingface.co/LPDoctor/insightface",
+      "revision": "25226b4048397eb2adc0fa5a3c21f416005fc228",
+      "source_path": "models/antelopev2/genderage.onnx",
+      "target_path": "models/antelopev2/genderage.onnx"
+    },
+    {
+      "path": "insightface/models/antelopev2/glintr100.onnx",
+      "sha256": "4ab1d6435d639628a6f3e5008dd4f929edf4c4124b1a7169e1048f9fef534cdf",
+      "bytes": 260665334,
+      "source": "https://huggingface.co/LPDoctor/insightface",
+      "revision": "25226b4048397eb2adc0fa5a3c21f416005fc228",
+      "source_path": "models/antelopev2/glintr100.onnx",
+      "target_path": "models/antelopev2/glintr100.onnx"
+    },
+    {
+      "path": "insightface/models/antelopev2/scrfd_10g_bnkps.onnx",
+      "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+      "bytes": 16923827,
+      "source": "https://huggingface.co/LPDoctor/insightface",
+      "revision": "25226b4048397eb2adc0fa5a3c21f416005fc228",
+      "source_path": "models/antelopev2/scrfd_10g_bnkps.onnx",
+      "target_path": "models/antelopev2/scrfd_10g_bnkps.onnx"
     },
     {
       "path": "ip-adapter/sdxl_models/image_encoder/preprocessor_config.json",

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Provision, manifest, and verify the local InstantStyle SDXL inference artifact set.
 
-The portrait engine uses four pinned, license-reviewed model sets:
+The portrait engine uses six pinned, license-reviewed model sets:
 
 * stabilityai/stable-diffusion-xl-base-1.0 (fp16) - base diffusion model
 * h94/IP-Adapter (Apache-2.0) - InstantStyle weights + SDXL CLIP image encoder
 * h94/IP-Adapter-FaceID - FaceID PlusV2 SDXL identity adapter weights
+* InstantX/InstantID (Apache-2.0) - facial-keypoint ControlNet, converted to fp16
 * public-data/insightface - buffalo_l ONNX pack for face embedding extraction
+* LPDoctor/insightface mirror - antelopev2 ONNX pack for facial keypoints
 
 All artifacts are written under ``models/instantstyle/`` with paths that mirror
 the upstream repository layout so diffusers/insightface loaders can consume
@@ -32,12 +34,15 @@ class ArtifactSource:
     repo_id: str
     revision: str
     source_path: str
+    convert: str = ""  # optional post-download conversion, e.g. "fp16"
 
 
 SDXL_REVISION = "462165984030d82259a11f4367a4eed129e94a7b"
 IP_ADAPTER_REVISION = "018e402774aeeddd60609b4ecdb7e298259dc729"
 FACEID_REVISION = "43907e6f44d079bf1a9102d9a6e56aef7a219bae"
+INSTANTID_REVISION = "57b32dfee076092ad2930c71fd6d439c2c3b1820"
 INSIGHTFACE_REVISION = "33c1063c49c785b7652d3fd529f86fa4f149392b"
+ANTELOPE_REVISION = "25226b4048397eb2adc0fa5a3c21f416005fc228"
 CLIP_VIT_H_REVISION = "main"
 CLIP_VIT_L_REVISION = "main"
 
@@ -74,6 +79,25 @@ _IP_ADAPTER_FILES = (
 )
 
 _FACEID_FILES = ("ip-adapter-faceid-plusv2_sdxl.bin",)
+
+# The InstantID ControlNet ships fp32 only. The engine container runs inside a
+# WSL2 cgroup whose memory budget includes mapped model files, so the 2.5 GB
+# fp32 checkpoint would cost a 2.5 GB fault-in burst at load time. Converting
+# it to fp16 halves both the mapped footprint and the weight-activation
+# transfer traffic; the conversion is recorded in the manifest.
+_INSTANTID_FILES = (
+    "ControlNetModel/config.json",
+    "ControlNetModel/diffusion_pytorch_model.safetensors -> "
+    "ControlNetModel/diffusion_pytorch_model.fp16.safetensors",
+)
+
+_ANTELOPE_FILES = (
+    "models/antelopev2/1k3d68.onnx",
+    "models/antelopev2/2d106det.onnx",
+    "models/antelopev2/genderage.onnx",
+    "models/antelopev2/glintr100.onnx",
+    "models/antelopev2/scrfd_10g_bnkps.onnx",
+)
 
 _INSIGHTFACE_FILES = (
     "models/buffalo_l/1k3d68.onnx",
@@ -120,12 +144,62 @@ SOURCES: tuple[ArtifactSource, ...] = (
     ),
     *(
         ArtifactSource(
+            "instantid", "InstantX/InstantID", INSTANTID_REVISION, path,
+            convert="fp16" if path.startswith("ControlNetModel/diffusion") else "",
+        )
+        for path in _INSTANTID_FILES
+    ),
+    *(
+        ArtifactSource(
             "insightface", "public-data/insightface", INSIGHTFACE_REVISION, path
         )
         for path in _INSIGHTFACE_FILES
     ),
+    *(
+        ArtifactSource(
+            "insightface", "LPDoctor/insightface", ANTELOPE_REVISION, path
+        )
+        for path in _ANTELOPE_FILES
+    ),
     *_CLIP_PREPROCESSOR_SOURCES,
 )
+
+# The InstantID ControlNet checkpoint is converted to fp16 after download.
+_CONTROLNET_FP16_TARGET = "instantid/ControlNetModel/diffusion_pytorch_model.fp16.safetensors"
+
+
+def _needs_fp16_conversion(path: Path) -> bool:
+    """Return True when a safetensors file is still fp32 and must be converted."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="np") as opened:
+        for key in opened.keys():
+            return opened.get_slice(key).get_dtype() != "F16"
+    return False
+
+
+def _convert_to_fp16(path: Path) -> None:
+    """Rewrite a safetensors checkpoint in place with fp16 weights."""
+    import numpy as np
+    from safetensors import numpy as np_safetensors
+
+    tensors = {
+        key: value.astype(np.float16)
+        for key, value in np_safetensors.load_file(str(path)).items()
+    }
+    np_safetensors.save_file(tensors, str(path))
+
+
+def _apply_conversions(model_root: Path) -> None:
+    """Run post-download conversions (currently: ControlNet fp32 -> fp16)."""
+    target = model_root / Path(*_CONTROLNET_FP16_TARGET.split("/"))
+    if not target.is_file():
+        return
+    if _needs_fp16_conversion(target):
+        print(f"converting {_CONTROLNET_FP16_TARGET} fp32 -> fp16")
+        _convert_to_fp16(target)
+    else:
+        print(f"conversion already applied {_CONTROLNET_FP16_TARGET}")
 
 
 def source_parts(source: ArtifactSource) -> tuple[str, str]:
@@ -163,8 +237,9 @@ def download_artifacts(model_root: Path, *, token: str | None, force: bool) -> N
         from huggingface_hub import hf_hub_download
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError(
-            "Model download requires `huggingface-hub`; install the provisioning "
-            "dependencies first (uv run --with huggingface-hub ...)."
+            "Model download requires `huggingface-hub`; fp16 conversion requires "
+            "`safetensors` and `numpy`. Install the provisioning dependencies "
+            "first (uv run --with huggingface-hub --with safetensors --with numpy ...)."
         ) from exc
 
     for index, source in enumerate(SOURCES, 1):
@@ -190,6 +265,7 @@ def download_artifacts(model_root: Path, *, token: str | None, force: bool) -> N
         if downloaded.resolve() != destination.resolve():
             destination.parent.mkdir(parents=True, exist_ok=True)
             downloaded.replace(destination)
+    _apply_conversions(model_root)
 
 
 def verify_artifacts(model_root: Path) -> list[str]:
@@ -221,17 +297,18 @@ def write_manifest(model_root: Path, manifest_path: Path) -> int:
         byte_size = path.stat().st_size
         sha256 = file_digest(path)
         source_filename, target_filename = source_parts(source)
-        artifacts.append(
-            {
-                "path": manifest_relative(source),
-                "sha256": sha256,
-                "bytes": byte_size,
-                "source": f"https://huggingface.co/{source.repo_id}",
-                "revision": source.revision,
-                "source_path": source_filename,
-                "target_path": target_filename,
-            }
-        )
+        artifact: dict[str, object] = {
+            "path": manifest_relative(source),
+            "sha256": sha256,
+            "bytes": byte_size,
+            "source": f"https://huggingface.co/{source.repo_id}",
+            "revision": source.revision,
+            "source_path": source_filename,
+            "target_path": target_filename,
+        }
+        if source.convert:
+            artifact["conversion"] = source.convert
+        artifacts.append(artifact)
         print(f"hashed {manifest_relative(source)} bytes={byte_size} sha256={sha256}")
     payload = {"schema_version": 1, "artifacts": artifacts}
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
