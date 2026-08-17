@@ -64,9 +64,6 @@ jobs:
           uv export --project packages/portrait_transfer --frozen --format requirements-txt --no-hashes --output-file /tmp/package-requirements.txt
           uv export --project services/api --frozen --format requirements-txt --no-hashes --output-file /tmp/api-requirements.txt
           uv export --project services/worker --frozen --format requirements-txt --no-hashes --output-file /tmp/worker-requirements.txt
-          cp services/ai_engine/requirements.txt /tmp/ai-engine-requirements.txt
-          printf '%s\n' 'torch==2.10.0+cu128' 'torchvision==0.25.0+cu128' 'insightface==1.0.1' >> /tmp/ai-engine-requirements.txt
           uv tool run pip-audit -r /tmp/package-requirements.txt
           uv tool run pip-audit -r /tmp/api-requirements.txt
           uv tool run pip-audit -r /tmp/worker-requirements.txt
-          uv tool run pip-audit --extra-index-url https://download.pytorch.org/whl/cu128 -r /tmp/ai-engine-requirements.txt

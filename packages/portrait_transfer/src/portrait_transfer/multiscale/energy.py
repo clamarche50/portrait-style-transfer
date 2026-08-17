@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from ..config import SOURCE_ENERGY_SIGMAS, AlgorithmProfile
-from ..geometry.sampling import warp
+from ..geometry.sampling import MATLAB_OOB_FILL, warp
 from .masked_gaussian import masked_gaussian
 
 
@@ -46,13 +46,17 @@ def compute_energy_pair(
         sigma = float(2 ** (level + 1))
         input_energy = local_energy(input_band, input_mask, sigma)
         reference_energy = local_energy(reference_band, reference_mask, sigma)
-        warped_reference_energy = warp(reference_energy, mapping, mode="border")
+        warped_reference_energy = warp(
+            reference_energy, mapping, mode="constant", cval=MATLAB_OOB_FILL
+        )
         order = EnergyOrder.BEFORE_WARP
     else:
         if not 0 <= level < len(SOURCE_ENERGY_SIGMAS):
             raise ValueError("source-compatible energy level is out of range")
         sigma = SOURCE_ENERGY_SIGMAS[level]
-        warped_band = warp(reference_band, mapping, mode="border")
+        warped_band = warp(
+            reference_band, mapping, mode="constant", cval=MATLAB_OOB_FILL
+        )
         warped_mask = warp(reference_mask, mapping, mode="constant")
         input_energy = local_energy(input_band, input_mask, sigma)
         warped_reference_energy = local_energy(warped_band, warped_mask, sigma)

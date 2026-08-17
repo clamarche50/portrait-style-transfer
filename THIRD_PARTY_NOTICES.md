@@ -1,12 +1,6 @@
 # Third-party notices
 
-This repository is a clean-room implementation informed by published research
-and public library APIs. Project lockfiles are the authoritative inventory for
-the web, API, worker, and classical package. The AI image currently pins every
-direct Python requirement plus its PyTorch/CUDA pair, but does not yet carry a
-fully resolved hash lock. Its release inventory is therefore the SBOM generated
-from the built image; release automation must reconcile that SBOM with this
-notice before distribution.
+This repository is a clean-room implementation informed by published research and public library APIs. The dependency lockfiles are the authoritative version inventory; release automation must generate an SBOM and reconcile it with this notice before distribution.
 
 ## Research reference
 
@@ -16,14 +10,12 @@ YiChang Shih, Sylvain Paris, Connelly Barnes, William T. Freeman, and Frédo Dur
 
 The citation is attribution, not a software-license grant. The uploaded paper and serialized authors' archive are not included in this repository or its images. The archive has no clear top-level license and includes components with restrictive notices; see `docs/licensing-review.md`.
 
-The active AI engine combines Stable Diffusion XL 1.0 with InstantStyle (Xiaoxiao Wu et al., “InstantStyle: Free Lunch towards Style-Preserving in Text-to-Image Generation”, 2024), the IP-Adapter FaceID PlusV2 identity adapter (Hu Ye et al., “IP-Adapter: Text Compatible Image Prompt Adapter for Text-to-Image Diffusion Models”, 2023), and the InstantID facial-keypoint ControlNet (Qixun Wang et al., “InstantID: Zero-shot Identity-Preserving Generation in Seconds”, 2024). Inference runs entirely through pinned diffusers/transformers libraries against locally mounted weights; the engine copies no upstream inference source code.
-
 ## Principal runtime libraries
 
 The application is expected to include or interact with the following projects. Their own licenses and notices govern their code:
 
 - FastAPI, Pydantic, SQLAlchemy, Alembic, Celery, boto3, NumPy, SciPy, scikit-image, Pillow, Prometheus client, and related Python dependencies.
-- OpenCV, PyTorch, Torchvision, Diffusers, Transformers, Accelerate, PEFT, safetensors, InsightFace, ONNX Runtime, and MediaPipe Tasks.
+- OpenCV, PyTorch, Torchvision, Kornia, and MediaPipe Tasks.
 - Next.js, React, vinext, Vite, Tailwind CSS, and frontend dependencies.
 - PostgreSQL, Redis, MinIO, Caddy, Prometheus, and Grafana container images.
 
@@ -31,17 +23,7 @@ Common upstream licenses include Apache-2.0, BSD, MIT, PostgreSQL, and AGPL lice
 
 ## Model artifacts
 
-The Face Landmarker and selfie multiclass segmentation artifacts listed in `models/manifest.json` are downloaded separately from official MediaPipe storage.
-
-`models/instantstyle/manifest.json` records the complete AI runtime set:
-
-- Stable Diffusion XL 1.0 base (fp16) from `stabilityai/stable-diffusion-xl-base-1.0`, governed by Stability AI's OpenRAIL++-M community license. Its model card documents prohibited/misuse scenarios, bias, and the need for safety controls.
-- The InstantStyle IP-Adapter SDXL weights and SDXL CLIP image encoder from `h94/IP-Adapter`, whose repository/model card states Apache-2.0.
-- The FaceID PlusV2 SDXL checkpoint from `h94/IP-Adapter-FaceID`, whose repository states Apache-2.0 for code; weight terms follow that card.
-- The InstantID ControlNet checkpoint from `InstantX/InstantID`, whose repository states Apache-2.0. The engine stores a locally fp16-converted copy (recorded in the manifest as a conversion of the upstream fp32 checkpoint).
-- The InsightFace buffalo_l ONNX pack from `public-data/insightface` and the antelopev2 ONNX pack from the `LPDoctor/insightface` mirror. InsightFace pretrained models are offered for non-commercial research purposes; commercial use requires separate review.
-
-Model artifacts are not covered by this repository's Apache-2.0 license. They are ignored by Git, excluded from build contexts, mounted locally, and must not be bundled with a release until their exact terms and notices have been reviewed. The FaceID `.bin` checkpoint is pickle-capable; the runtime verifies its SHA-256 and loads it with restricted `weights_only` semantics before accepting it.
+The Face Landmarker and selfie multiclass segmentation artifacts listed in `models/manifest.json` are downloaded separately from official MediaPipe storage. Model artifacts are not covered by this repository's Apache-2.0 license. Review the MediaPipe model terms and any model-card restrictions before redistributing weights.
 
 ## Deliberately excluded software
 
@@ -53,14 +35,6 @@ Before a release:
 
 1. Generate an SBOM from all Python, npm, and container lock data.
 2. Collect all required license texts and attribution notices.
-3. Review SDXL OpenRAIL++-M obligations, InsightFace non-commercial model terms, IP-Adapter/MediaPipe terms, and container-image licenses.
-4. Run the model-binary tracking guard.
+3. Review model terms and container-image licenses.
+4. Run the copied-source compliance check.
 5. Obtain human legal review before making a commercial-distribution claim.
-6. Resolve every high or critical dependency/image advisory, or record a
-   time-bounded, owner-approved exception with exploitability and mitigation.
-
-The manual `production-ai-image` workflow builds the real CUDA image, runs a
-high/critical Trivy scan, and emits a CycloneDX SBOM. CPU contract CI uses a
-stub image and is not a substitute for that release evidence. A successful
-`pip check` confirms only that installed requirements are mutually compatible;
-it does not clear known vulnerabilities.

@@ -1,12 +1,34 @@
-"""Portrait analysis and style ranking shared by the worker and API."""
+"""Public API for the clean-room portrait transfer engine."""
 
+from .config import AlgorithmProfile, BackgroundMode, TransferSettings
 from .mediapipe_vision import MediaPipePortraitAnalyzer
-from .style_ingestion import IngestedStyle, ingest_style
-from .types import PortraitAnalysis
+from .pipeline import create_default_runtime, transfer_portrait_style
+from .resume import (
+    RESUME_BACKGROUND,
+    RESUME_EYES,
+    RESUME_FROM_STAGE_KEY,
+    RESUME_MULTISCALE,
+)
+from .types import (
+    CorrespondenceResult,
+    PortraitAnalysis,
+    RuntimeContext,
+    TransferResult,
+)
 
 __all__ = [
-    "IngestedStyle",
+    "RESUME_BACKGROUND",
+    "RESUME_EYES",
+    "RESUME_FROM_STAGE_KEY",
+    "RESUME_MULTISCALE",
+    "AlgorithmProfile",
+    "BackgroundMode",
+    "CorrespondenceResult",
     "MediaPipePortraitAnalyzer",
     "PortraitAnalysis",
-    "ingest_style",
+    "RuntimeContext",
+    "TransferResult",
+    "TransferSettings",
+    "create_default_runtime",
+    "transfer_portrait_style",
 ]

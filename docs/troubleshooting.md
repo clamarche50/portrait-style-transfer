@@ -2,88 +2,51 @@
 
 ## Readiness is unhealthy
 
-Inspect both `GET /api/v1/health/ready` and the internal AI service's
-`GET /health/ready`. API readiness covers PostgreSQL, Redis, object storage,
-buckets, and MediaPipe assets. AI readiness covers the complete InstantStyle
-manifest, CUDA availability, and model initialization. Readiness never downloads weights.
+Inspect `GET /api/v1/health/ready`. The common intentional failure is missing model files. Run `make models` or place verified offline files named by `models/manifest.json` under the mounted model directory. Also verify PostgreSQL, Redis, MinIO health, bucket creation, and service credentials. Readiness does not download models.
 
-Run the offline checks first:
+## Model download fails
 
-```sh
-make verify-models
-docker compose config --quiet
-docker compose run --rm ai-engine python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name())"
-```
+Confirm outbound HTTPS and official URL access. Partial files are temporary and never replace a valid model. If an upstream URL/version changed, update the manifest only after reviewing the official model page, terms, filename, and recorded digest. Air-gapped users should run `download_models.py --offline` after provisioning.
 
-## InstantStyle model provisioning fails
+## Reference extraction refuses a path
 
-The tree contains the SDXL base, IP-Adapter, FaceID, and InsightFace artifacts
-and occupies about 13 GiB. Confirm sufficient disk space and access to the
-official Hugging Face repositories. Partial downloads never replace a valid
-artifact. If a source changes bytes, do not weaken verification: review
-provenance and licensing, then update the manifest deliberately.
-
-Air-gapped deployments must pre-provision the files and run
-`python scripts/provision_instantstyle_models.py --verify-only` before starting Compose.
-
-## AI service cannot see the GPU
-
-On the host, check `nvidia-smi`. In Docker Desktop, enable the WSL 2 backend and
-NVIDIA GPU support, then run the container diagnostic above. The AI image pins a
-CUDA 12.8-compatible PyTorch build for the target RTX 5070. A healthy host driver
-does not by itself prove that the Docker runtime has GPU access.
-
-## AI service exits or is killed while loading
-
-The default sidecar limit is 10 GiB system memory and the GPU has 12 GiB VRAM.
-Close other GPU-heavy applications and inspect `docker compose logs ai-engine`.
-If Docker Desktop has less than the required system-memory allocation, increase
-it before changing the service limit. Do not enable more than one Uvicorn worker;
-each process would load another model copy.
-
-## AI request times out
-
-Inspect `docker compose logs ai-engine worker-cpu` and confirm
-`AI_ENGINE_URL=http://ai-engine:8010`. Cold initialization is covered by the
-600-second readiness start period; inference uses
-`AI_ENGINE_REQUEST_TIMEOUT_SECONDS` (600 seconds by default). Increase the
-request timeout only after confirming that the GPU is active and the process is
-making progress, and keep `WORKER_TASK_TIME_LIMIT_SECONDS` safely above it.
+This is a security feature. The parser rejects absolute paths, `..`, backslashes, Windows device names, duplicates, symlink traversal, and existing destinations unless `--overwrite` is explicit. Extract only to ignored `reference/original-matlab/`; never weaken checks to accommodate an unexpected archive.
 
 ## Job remains queued
 
-The `worker-cpu` queue worker orchestrates the internal GPU sidecar. Check that
-it consumes `portrait-cpu`, Redis URLs match, `ai-engine` is healthy, concurrency
-quota permits work, and the job has not expired or been cancelled.
+Check that a worker consumes `portrait-cpu` or `portrait-gpu`, Redis URLs match, concurrency quota permits work, and the job has not expired/cancelled. GPU jobs fall back to CPU routing only according to configured policy; starting a GPU profile without a usable CUDA runtime is not sufficient.
 
-## Job fails portrait validation
+## Job fails validation
 
-Use the safe error code and compatibility report. One near-frontal face is
-required. Improve facial resolution, focus, lighting, crop, or occlusion, or use
-a reference with a closer pose and expression. The application rejects unsafe
-inputs instead of presenting an unreliable result.
+Use the safe error code and compatibility report. One near-frontal face is required. Improve facial resolution, focus, lighting, crop, occlusion, or choose a reference with closer pose/expression. The application intentionally rejects profiles, multiple faces, severe blur, and poor overlap rather than returning a misleading success.
 
-## Identity, hair, glasses, or background changed
+## Mask or hair boundary artifacts
 
-InstantStyle is generative; the FaceID identity adapter reduces but does not
-eliminate identity drift. Increase structure strength, reduce style strength, and use a
-reference with similar pose, framing, hair silhouette, and eyewear. Review the
-full image before use. Background modes are applied after generation, but a
-subject boundary can still be imperfect.
+Use the non-destructive add/remove mask brush, then rerun. Mask edits invalidate mask-aware pyramids and downstream stages. Wispy hair remains a known difficult case; lowering transfer strength may be preferable to overconfident matting.
 
-## Repeated runs differ
+## Alignment or doubled features
 
-Record the same input/reference bytes, model-manifest hashes, profile,
-`random_seed`, strengths, inference steps, container revision, GPU/PyTorch
-runtime, and output settings. A seed improves repeatability but does not promise
-byte-identical results across different GPU or dependency versions.
+Inspect affine, line-morph, dense preview, valid fraction, displacement, and Jacobian diagnostics. Add paired control points or disable dense alignment. The fallback chain must be visible; never add morph and dense offsets directly.
+
+## Noise or harsh texture
+
+Lower transfer strength, dynamic-range mix, or residual strength; select a cleaner compatible reference. High gains can amplify input noise even though gain is clamped and smoothed.
+
+## Eye result is implausible
+
+Disable one/both highlights or correct pupil/iris centers. Automatic transfer intentionally switches off for closed, occluded, blurred, off-axis, oversized, or out-of-iris catchlights.
+
+## Reference background contains face fragments
+
+Do not accept the output. Inspect reference alpha and inpainting diagnostics or select keep/blur/solid mode. Facial reference pixels must never be warped into background fill.
 
 ## Compose cannot bind ports or trust TLS
 
-Change host-side ports in a local override. The AI sidecar intentionally has no
-host port. `tls internal` uses Caddy's local CA; trust it for development or use
-the documented loopback HTTP endpoint. Production must use a publicly trusted
-issuer.
+Change host-side ports in local overrides. `tls internal` uses Caddy's local CA; either trust it for development or use direct loopback HTTP endpoints. Production must use a publicly trusted issuer.
+
+## Deterministic hash differs
+
+Confirm identical lockfiles, model hashes, algorithm profile/version, seed, CPU/GPU backend, image encoder parameters, and architecture. Byte-stable PNG expectations apply to locked synthetic CI; compare decoded pixels and diagnostics separately when investigating cross-platform codec differences.
 
 ## Vercel shows "The request could not be completed"
 

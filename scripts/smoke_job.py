@@ -15,7 +15,6 @@ import urllib.parse
 import urllib.request
 import uuid
 import zlib
-from pathlib import Path
 from typing import Any
 
 
@@ -57,8 +56,6 @@ def _png(width: int, height: int, variant: int) -> bytes:
 class Client:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-        hostname = urllib.parse.urlsplit(self.base_url).hostname
-        self.loopback = hostname in {"localhost", "127.0.0.1", "::1"}
         self.cookies = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.cookies)
@@ -91,14 +88,6 @@ class Client:
         token = self._csrf()
         if method not in {"GET", "HEAD", "OPTIONS"} and token:
             headers["X-CSRF-Token"] = token
-        # Browsers treat loopback origins as trustworthy for Secure cookies,
-        # while urllib intentionally refuses to return them over HTTP.
-        if self.loopback:
-            cookie_header = "; ".join(
-                f"{cookie.name}={cookie.value}" for cookie in self.cookies
-            )
-            if cookie_header:
-                headers["Cookie"] = cookie_header
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with self.opener.open(request, timeout=30) as response:
@@ -137,20 +126,13 @@ class Client:
         )
         return json.loads(payload) if payload else {}
 
-    def upload(
-        self,
-        kind: str,
-        payload: bytes,
-        *,
-        filename: str = "synthetic.png",
-        content_type: str = "image/png",
-    ) -> dict[str, Any]:
+    def upload(self, kind: str, payload: bytes) -> dict[str, Any]:
         boundary = f"portrait-smoke-{uuid.uuid4().hex}"
         chunks = [
             f'--{boundary}\r\nContent-Disposition: form-data; name="kind"\r\n\r\n{kind}\r\n'.encode(),
             (
                 f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
-                f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'
+                'filename="synthetic.png"\r\nContent-Type: image/png\r\n\r\n'
             ).encode(),
             payload,
             f"\r\n--{boundary}--\r\n".encode(),
@@ -169,30 +151,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://localhost:8000/api/v1")
     parser.add_argument("--timeout", type=float, default=240.0)
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--reference", type=Path)
     return parser.parse_args()
-
-
-def _fixture(path: Path | None, variant: int) -> tuple[bytes, str, str]:
-    if path is None:
-        return _png(512, 512, variant), "synthetic.png", "image/png"
-    suffix = path.suffix.lower()
-    content_types = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-    }
-    if suffix not in content_types:
-        raise ValueError(f"Unsupported smoke fixture type: {path}")
-    return path.read_bytes(), path.name, content_types[suffix]
 
 
 def main() -> int:
     args = parse_args()
-    if (args.input is None) != (args.reference is None):
-        raise ValueError("--input and --reference must be supplied together")
     client = Client(args.url)
     ready = client.json("GET", "/health/ready")
     if str(ready.get("status", "")).lower() not in {"ready", "ok", "healthy"}:
@@ -203,17 +166,8 @@ def main() -> int:
     job: dict[str, Any] | None = None
     deleted = False
     try:
-        input_payload, input_name, input_type = _fixture(args.input, 0)
-        reference_payload, reference_name, reference_type = _fixture(args.reference, 1)
-        input_asset = client.upload(
-            "INPUT", input_payload, filename=input_name, content_type=input_type
-        )
-        reference_asset = client.upload(
-            "REFERENCE",
-            reference_payload,
-            filename=reference_name,
-            content_type=reference_type,
-        )
+        input_asset = client.upload("INPUT", _png(512, 512, 0))
+        reference_asset = client.upload("REFERENCE", _png(512, 512, 1))
         job = client.json(
             "POST",
             "/jobs",
@@ -221,12 +175,9 @@ def main() -> int:
                 "input_asset_id": input_asset["id"],
                 "reference_asset_id": reference_asset["id"],
                 "settings": {
-                    "algorithm_profile": "ai_instantstyle_v1",
-                    "style_strength": 0.55,
-                    "structure_strength": 1.0,
-                    "inference_steps": 30,
-                    "random_seed": 7,
-                    "background_mode": "KEEP",
+                    "algorithm_profile": "paper_exact",
+                    "dense_alignment": False,
+                    "processing_long_edge": 512,
                     "output_format": "PNG",
                 },
             },

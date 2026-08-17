@@ -14,20 +14,23 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase,
     title: {
-      default: "Portrait Studio — AI portrait style transfer",
+      default: "Portrait Studio — local, multiscale headshot style transfer",
       template: "%s · Portrait Studio",
     },
-    description: "Guide a headshot's color, lighting, and texture with a reference portrait using InstantStyle. Review every AI-generated edit for likeness changes.",
+    description: "Transfer the light, tone, texture, and color of a reference headshot while preserving the input portrait.",
     openGraph: {
       title: "Portrait Studio",
-      description: "Move the light. Shape the finish. Review the AI-generated result.",
+      description: "Move the light. Keep the person.",
       type: "website",
+      images: [{ url: "/og.png", width: 1734, height: 909, alt: "Portrait Studio — Move the light. Keep the person." }],
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: "Portrait Studio",
-      description: "Move the light. Shape the finish. Review the AI-generated result.",
+      description: "Move the light. Keep the person.",
+      images: ["/og.png"],
     },
+    icons: { icon: "/og.png", shortcut: "/og.png" },
   };
 }
 

@@ -1,139 +1,109 @@
 # Algorithm
 
-## Production profile
+## Profiles and coordinate convention
 
-`ai_instantstyle_v1` is the only public transfer profile. It combines four
-pinned, license-reviewed model sets into one diffusion pass:
+`SOURCE_2014_COMPAT` is the production default. It reproduces the archived 2014 MATLAB release (the project's ground-truth specification) as closely as a deterministic port allows. `PAPER_EXACT` implements the paper-specified multiscale equations instead and remains selectable.
 
-- Stable Diffusion XL 1.0 (fp16) as the local generative backbone;
-- InstantStyle (IP-Adapter SDXL weights) for reference appearance, injected
-  only through the style-sensitive `up.block_0` attention site;
-- IP-Adapter FaceID PlusV2 (SDXL) plus InsightFace buffalo_l embeddings to
-  preserve the subject's identity;
-- the InstantID facial-keypoint ControlNet, which locks the facial pose
-  during repainting.
+Every warp is an absolute backward map:
 
-The content upload is the structure/identity image and also seeds the
-latents: generation is image-to-image with the source portrait as the init,
-so the subject's composition and identity are anchored by the input instead
-of being regenerated from noise. The reference upload supplies style and
-appearance through the style adapter only. No hosted inference provider,
-face-recognition API, or runtime Hugging Face request is used. The service
-starts in offline mode and loads only `/models/instantstyle` after manifest
-verification.
+```text
+M[y, x] = source coordinate sampled to produce destination pixel (x, y)
+```
 
-The deterministic analysis layer in `packages/portrait_transfer` performs
-preflight, MediaPipe face analysis, segmentation, quality scoring, and
-reference style ranking. It no longer renders pixels; the classical 2014
-multiscale transfer pipeline has been removed.
+Offsets exist only at library boundaries. Reference image fields are derived from original reference coordinates rather than repeatedly resampling intermediate images.
 
-### Identity guard
+## Preflight and canonical crop
 
-After each pass the engine detects the output face with buffalo_l and
-compares its ArcFace embedding against the source face embedding. When the
-cosine similarity drops below `ENGINE_IDENTITY_REPAIR_BELOW` (default 0.45),
-a stylized anchor pass runs: the source face region is composited back onto
-the styled output under a feathered elliptical mask (aligned to wherever the
-painted face drifted), then harmonized with a light repaint at reduced denoise
-(`0.33`) and a strong style scale (`0.8 × style`) so the brushwork survives on
-the pasted face. If that pass still misses the threshold but stays above
-`ENGINE_IDENTITY_FAIL_BELOW` (default 0.30), it is accepted; otherwise one
-photographic backstop pass repaints the pasted face as shallowly as possible
-and lets identity win over style. If the best attempt still falls below
-`ENGINE_IDENTITY_FAIL_BELOW`, the engine fails the request with
-`AI_IDENTITY_GUARD_FAILED` instead of returning an unrecognizable subject.
+Decoder validation corrects EXIF orientation, converts to sRGB, handles alpha against a neutral background, strips metadata, and enforces encoded/decoded limits. MediaPipe Face Landmarker must find exactly one near-frontal face with both irises and major features in frame. Quality analysis measures facial resolution, blur, exposure, noise, crop truncation, matte confidence, and an occlusion proxy.
 
-After the guard passes, a Lab-space Reinhard-style palette match shifts the
-finished portrait's color statistics toward the reference art
-(`ENGINE_PALETTE_BLEND`, default `0.8`). The blend is halved or dropped if
-re-measuring identity shows the color shift eroding the face below the repair
-threshold, so the palette step never trades away the guard's work.
+The input head crop includes hair, ears, chin, and upper shoulders when available, with 35% horizontal, 45% top, and 30% bottom margins. It is reflect-padded when necessary and processed at a configurable long edge, normally 1280. Transforms among original input, canonical crop, and reference coordinates are retained for final composition.
 
-## Preprocessing and restoration
+MediaPipe multiclass segmentation is refined with GrabCut, morphology, connected-component selection, and a soft distance/edge feather. The effective transfer support is input head alpha multiplied by the warped reference head alpha. Unsupported or low-confidence areas preserve the input.
 
-Both payloads must decode as JPEG, PNG, or WebP and pass encoded-byte,
-decoded-pixel, and minimum-dimension limits. EXIF orientation is applied and
-input is converted to RGB.
+## Correspondence
 
-Each image is scaled so its short side targets 1024 pixels (the SDXL native
-resolution) without changing aspect ratio. Dimensions are rounded to
-model-compatible multiples of 64, and the long side is capped at 1280 pixels
-by default for the local 12 GiB GPU. There is no square padding or crop. The
-content transform is retained and the generated result is resized back to the
-original content dimensions. `ENGINE_MAX_LONG_SIDE` is an explicit
-quality/VRAM control and must remain a multiple of 64 from 512 through 1536.
+### Similarity/partial affine
 
-Inference fits the 12 GiB card through sequential CPU offload of the text
-encoders, ControlNet, and adapters, VAE slicing/tiling, and CPU-side CLIP
-vision encoders. The InstantID ControlNet is stored as a locally converted
-fp16 checkpoint: the upstream fp32 file would double the mapped-memory
-footprint charged to the WSL2 container cgroup.
+Eye centers, mouth center, and optionally nose base define a RANSAC transform from reference to input. Reflections, excessive scale/rotation, too few inliers, and high normalized anchor error invalidate the transform.
 
-A post-inference guard rejects:
+### Beier-Neely line morph
 
-- changed output dimensions;
-- non-RGB or non-finite pixels; and
-- a large increase in border anisotropy associated with stretched-edge artifacts.
+Named landmark curves create directed segment pairs for jaw, brows, nose, eyes, lips, optional forehead/hairline, and the crop boundary. For destination point `X` and destination segment `P'Q'`:
 
-## User controls
+```text
+u = dot(X-P', Q'-P') / ||Q'-P'||²
+v = dot(X-P', perpendicular(Q'-P')) / ||Q'-P'||
+X_i = P + u(Q-P) + v perpendicular(Q-P)/||Q-P||
+weight_i = (length(P'Q')^p / (a + segment_distance))^b
+M_line(X) = sum(weight_i X_i) / sum(weight_i)
+```
 
-- `style_strength` (`0..1`, default `0.75`) scales the InstantStyle attention injection.
-- `structure_strength` (`0..1`, default `0.90`) scales the source-anchoring effect:
-  higher values repaint fewer denoising timesteps (img2img denoise strength
-  `0.65 - 0.20 × structure_strength`, clamped to `[0.45, 0.9]`). The FaceID
-  identity adapter runs at its full limit (`ENGINE_FACEID_SCALE_LIMIT`, default
-  `1.0`) in every pass, and the InstantID ControlNet runs at
-  `ENGINE_CONTROLNET_SCALE` (default `0.35`).
-- `inference_steps` (`10..50`, default `30`) trades latency for denoising refinement.
-- `random_seed` (`0..2^31-1`) selects the diffusion noise sequence.
+Defaults are `a=10`, `b=1`, `p=1`. CPU evaluation is chunked; a scalar implementation serves as the numeric oracle. Zero-length segments, invalid sampling, and foldovers are guarded, with affine fallback.
 
-The same inputs, model artifacts, settings, and seed are intended to be
-repeatable on the same runtime, but CUDA kernels and dependency changes can
-still produce small differences. Diagnostics record the engine, controls,
-elapsed time, seed, manifest identity, and peak allocated GPU memory.
+### Dense descriptor refinement
 
-## Safety and failure behavior
+An ephemeral aligned preview is locally contrast-normalized and optimized at configured coarse-to-fine scales. The CPU path uses a deterministic clean-room dense gradient descriptor and continuous robust residual flow; the optional CUDA path uses Kornia DenseSIFT descriptors. Both paths validate improvement, bounds, and Jacobians. This is a clean-room approximation of the paper's SIFT Flow stage, not the archive's bundled discrete MEX runtime.
 
-The service eagerly loads and verifies models before becoming ready. Missing,
-truncated, or modified files fail closed. CUDA unavailability, insufficient GPU
-memory, invalid model state, invalid input, and output-quality failures use
-specific error codes. Production never substitutes a test stub after an AI
-error.
+The final map composes rather than adds offsets:
 
-Safetensors artifacts are used for the SDXL, IP-Adapter, and converted
-ControlNet weights. The FaceID PlusV2 checkpoint is a legacy PyTorch file and
-is opened with restricted `weights_only` semantics. Model files are read-only
-inside the container.
+```text
+M_final(x) = sample(M_affine_line, x + f(x))
+```
 
-## Known limitations
+Validation considers descriptor improvement, valid fraction, low-resolution consistency, displacement percentiles, negative Jacobians, mask overlap, and landmark-edge alignment. Fallback is dense → affine plus line morph → affine → incompatible-pair rejection.
 
-Diffusion is generative. It can change facial details, apparent age,
-expression, hair, glasses, jewelry, background, lighting, or perceived
-identity. The img2img init, keypoint ControlNet, FaceID adapter, and identity
-guard all reduce drift, but none of them proves identity preservation. The
-identity guard compares ArcFace embeddings of the same person across stylized
-renderings; it rejects clearly wrong subjects but can also false-fail on
-unusual faces or heavy stylization. The engine can also reproduce bias and
-unsafe tendencies inherited from the Stable Diffusion XL training data.
+## Lab and full-resolution stack
 
-The Stable Diffusion safety checker is disabled in this pipeline, and this
-repository does not yet include an equivalent local input/output moderation
-model. Public release is blocked on explicit acceptable-use/reporting controls
-and a reviewed local moderation strategy; private-network isolation is not
-content-safety enforcement.
+Production uses standards-compliant sRGB/D65 CIE Lab in float32. L is internally normalized to `[0,1]`; chroma ranges are explicit in code. Gaussian operations use symmetric boundaries and normalized mask support:
 
-Outputs must be presented as AI-edited/generated portraits. Do not use them as
-identity evidence, without the depicted person's permission, for deceptive
-impersonation, or to infer factual attributes. Real-quality validation requires
-rights-cleared, diverse portrait pairs; synthetic and stub tests establish only
-software behavior.
+```text
+masked_gaussian(X,M,sigma) = G_sigma(X*M) / max(G_sigma(M), 1e-6)
+```
 
-## Provenance
+No spatial downsampling occurs. With `B_s` denoting a masked Gaussian blur:
 
-`models/instantstyle/manifest.json` is the machine-readable authority for the
-runtime artifacts: the SDXL base tree, the InstantStyle/IP-Adapter weights and
-CLIP image encoder, the FaceID PlusV2 checkpoint, the locally fp16-converted
-InstantID ControlNet, and the InsightFace buffalo_l and antelopev2 ONNX
-packs. Hugging Face artifacts pin immutable commit revisions; each downloaded
-file is additionally pinned by byte length and SHA-256. See
-`THIRD_PARTY_NOTICES.md` before redistribution.
+```text
+L0 = I-B2       L3 = B8-B16
+L1 = B2-B4      L4 = B16-B32
+L2 = B4-B8      L5 = B32-B64
+R  = B64
+```
+
+The six bands plus residual reconstruct the supported input within numeric tolerance.
+
+## Energy and robust gain
+
+For band `l=0..5`, input and reference energy use sigma `2^(l+1)`. Reference energy is computed in reference coordinates and then warped:
+
+```text
+S_l(I) = masked_gaussian(L_l(I)^2, M_input, 2^(l+1))
+S_l(E) = masked_gaussian(L_l(E)^2, M_reference, 2^(l+1))
+g_l = sqrt(warp(S_l(E), M_final) / (S_l(I) + 1e-4))
+g_l = masked_gaussian(clip(g_l, 0.9, 2.8), M_effective, 3*2^l)
+g_effective = exp(strength * log(max(g_l, 1e-6)))
+```
+
+Alignment-confidence protection blends gain toward one, and explicit correction regions can lock, constrain, or copy gain. These protections are switchable extensions around the paper result.
+
+L transfers all six detail bands. Lab a/b preserve input bands 0–2 and transfer bands 3–5. Production behavior never switches on a photographer/style name. A monochrome flag is derived during ingestion and neutralizes chroma intentionally.
+
+The residual is:
+
+```text
+R_out = (1-residual_strength) R_input
+      + residual_strength warp(R_reference, M_final)
+```
+
+After reconstruction, masked empirical-CDF histogram matching can be mixed with the local result; default mix is 0.25. The result is gamut-compressed, confidence-blended toward input, composited through soft alpha, and restored to original resolution.
+
+## Eyes, backgrounds, and ranking
+
+Style ingestion finds suitable iris-local highlights using `k=3` Lab clustering plus component, luminance, compactness, saturation, and confidence tests. Target highlights are conservatively removed/inpainted; source catchlights are pupil-aligned, iris-scaled, optionally rotated, clipped, and alpha-composited in linear light. Low-confidence cases disable automatically.
+
+Background modes keep or blur input, use a solid color, or use an inpainted/crop-matched reference background. Facial reference pixels are never treated as background.
+
+Style examples store six `32×32` L-energy features plus pose, shape, mask, blur, color, edge, and crop metrics. Severe mismatches are filtered. Ranking weights energy NCC 0.65, pose 0.15, landmark shape 0.10, photometric compatibility 0.05, and mask quality 0.05; it returns the top three with components.
+
+## Source-compatible differences
+
+The default profile merges the finest two bands into a five-band stack beginning at sigma 4, computes energy after warping with effective sigmas `[8,16,32,64,128]`, clamps gain without paper gain smoothing, warps reference planes with the archive's `0.6` out-of-bounds fill, and uses the archive's non-gamma-corrected Lab helpers. These choices match the archived MATLAB release and are documented rather than hidden.

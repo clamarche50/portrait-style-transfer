@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .background import extract_reference_background
 from .exceptions import PortraitTransferError
+from .eyes.extraction import extract_highlight_asset
 from .image_io import normalize_rgb
 from .landmarks import canonical_68_landmarks
 from .preflight import PortraitAnalyzer, analyze_portrait
@@ -15,6 +17,7 @@ from .quality import analyze_quality
 from .selection import build_style_feature
 from .types import (
     BoundingBox,
+    EyeHighlightAsset,
     PortraitAnalysis,
     PortraitMasks,
     PoseEstimate,
@@ -28,6 +31,8 @@ class IngestedStyle:
     rgb: NDArray[np.float32]
     analysis: PortraitAnalysis
     feature: StyleFeature
+    background: NDArray[np.float32]
+    eye_assets: tuple[EyeHighlightAsset | None, EyeHighlightAsset | None]
     has_face: bool = True
 
 
@@ -55,9 +60,7 @@ def _faceless_analysis(image: NDArray[np.float32]) -> PortraitAnalysis:
         effective_transfer=ones,
         foreground_alpha=ones,
     )
-    quality = analyze_quality(
-        image, landmarks, face_box, ones, mask_confidence=0.5
-    )
+    quality = analyze_quality(image, landmarks, face_box, ones, mask_confidence=0.5)
     return PortraitAnalysis(
         landmarks=landmarks,
         face_box=face_box,
@@ -84,7 +87,10 @@ def ingest_style(
             landmarks=None,
             mask_quality=0.5,
         )
-        return IngestedStyle(identifier, image, analysis, feature, has_face=False)
+        background = extract_reference_background(image, analysis.masks.foreground_alpha)
+        return IngestedStyle(
+            identifier, image, analysis, feature, background, (None, None), has_face=False
+        )
     feature = build_style_feature(
         identifier,
         image,
@@ -93,4 +99,8 @@ def ingest_style(
         landmarks=analysis.landmarks,
         mask_quality=analysis.quality.mask_confidence,
     )
-    return IngestedStyle(identifier, image, analysis, feature)
+    background = extract_reference_background(image, analysis.masks.foreground_alpha)
+    eyes = tuple(extract_highlight_asset(image, iris) for iris in analysis.masks.irises)
+    return IngestedStyle(
+        identifier, image, analysis, feature, background, (eyes[0], eyes[1])
+    )

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image
 from portrait_transfer.color.lab import lab_to_rgb, lab_to_rgb_gamut_safe, rgb_to_lab
+from portrait_transfer.color.legacy_color import legacy_lab_to_rgb, legacy_rgb_to_lab
 from portrait_transfer.config import ImageLimits
 from portrait_transfer.exceptions import ImageTooLargeError
 from portrait_transfer.image_io import decode_image, encode_jpeg, encode_png
@@ -15,6 +16,12 @@ def test_standard_rgb_lab_round_trip_is_bounded(rng: np.random.Generator) -> Non
     rgb = rng.random((31, 29, 3), dtype=np.float32)
     restored = lab_to_rgb(rgb_to_lab(rgb), clip=True)
     assert np.max(np.abs(restored - rgb)) < 2e-5
+
+
+def test_legacy_rgb_lab_round_trip_is_bounded(rng: np.random.Generator) -> None:
+    rgb = rng.random((17, 19, 3), dtype=np.float32)
+    restored = legacy_lab_to_rgb(legacy_rgb_to_lab(rgb))
+    assert np.max(np.abs(restored - rgb)) < 2e-4
 
 
 def test_gamut_safe_conversion_is_finite_and_ranged() -> None:

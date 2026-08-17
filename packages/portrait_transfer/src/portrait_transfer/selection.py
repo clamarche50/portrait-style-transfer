@@ -73,8 +73,6 @@ def build_style_feature(
     return StyleFeature(
         identifier,
         vector,
-        # None stays None so face-less references score neutrally instead of
-        # masquerading as a frontal portrait in the pose gate.
         pose,
         shape,
         photometric,

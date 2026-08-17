@@ -10,12 +10,21 @@ from portrait_api.models import ArtifactKind, ProcessingStage
 _STAGE_ORDER = list(ProcessingStage)
 
 _EARLIEST_STAGE = {
+    "mask": ProcessingStage.SEGMENTATION,
+    "alignment": ProcessingStage.AFFINE_ALIGNMENT,
+    "gain_copy": ProcessingStage.MULTISCALE_TRANSFER,
+    "eye": ProcessingStage.EYE_HIGHLIGHTS,
     "background": ProcessingStage.BACKGROUND,
 }
 
 _ARTIFACT_STAGE = {
     ArtifactKind.INPUT_MASK: ProcessingStage.SEGMENTATION,
     ArtifactKind.REFERENCE_MASK: ProcessingStage.SEGMENTATION,
+    ArtifactKind.AFFINE_PREVIEW: ProcessingStage.AFFINE_ALIGNMENT,
+    ArtifactKind.PIECEWISE_PREVIEW: ProcessingStage.PIECEWISE_ALIGNMENT,
+    ArtifactKind.DENSE_PREVIEW: ProcessingStage.DENSE_ALIGNMENT,
+    ArtifactKind.ENERGY: ProcessingStage.MULTISCALE_TRANSFER,
+    ArtifactKind.GAIN: ProcessingStage.MULTISCALE_TRANSFER,
     ArtifactKind.OUTPUT: ProcessingStage.POSTPROCESSING,
     ArtifactKind.OTHER: ProcessingStage.POSTPROCESSING,
 }

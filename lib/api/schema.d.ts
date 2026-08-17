@@ -4,40 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/health/live": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Live */
-        get: operations["live_api_v1_health_live_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/health/ready": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Ready */
-        get: operations["ready_api_v1_health_ready_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/assets/upload": {
         parameters: {
             query?: never;
@@ -107,6 +73,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Live */
+        get: operations["live_api_v1_health_live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ready */
+        get: operations["ready_api_v1_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -142,23 +142,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Job Events */
-        get: operations["job_events_api_v1_jobs__job_id__events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/jobs/{job_id}/cancel": {
         parameters: {
             query?: never;
@@ -176,7 +159,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}/download-url": {
+    "/api/v1/jobs/{job_id}/corrections": {
         parameters: {
             query?: never;
             header?: never;
@@ -185,8 +168,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Job Download Url */
-        post: operations["job_download_url_api_v1_jobs__job_id__download_url_post"];
+        /** Save Corrections */
+        post: operations["save_corrections_api_v1_jobs__job_id__corrections_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -210,7 +193,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/jobs/{job_id}/corrections": {
+    "/api/v1/jobs/{job_id}/download-url": {
         parameters: {
             query?: never;
             header?: never;
@@ -219,8 +202,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Save Corrections */
-        post: operations["save_corrections_api_v1_jobs__job_id__corrections_post"];
+        /** Job Download Url */
+        post: operations["job_download_url_api_v1_jobs__job_id__download_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Events */
+        get: operations["job_events_api_v1_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -315,23 +315,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/styles/{style_id}/reindex": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reindex Style */
-        post: operations["reindex_style_api_v1_styles__style_id__reindex_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/styles/{style_id}/rank": {
         parameters: {
             query?: never;
@@ -349,6 +332,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/styles/{style_id}/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reindex Style */
+        post: operations["reindex_style_api_v1_styles__style_id__reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -357,7 +357,25 @@ export interface components {
          * AlgorithmProfile
          * @enum {string}
          */
-        AlgorithmProfile: "ai_instantstyle_v1";
+        AlgorithmProfile: "paper_exact" | "source_2014_compat";
+        /** AlignmentCorrection */
+        AlignmentCorrection: {
+            /** Input Points */
+            input_points: [
+                number,
+                number
+            ][];
+            /** Reference Points */
+            reference_points: [
+                number,
+                number
+            ][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "alignment";
+        };
         /**
          * AssetKind
          * @enum {string}
@@ -365,53 +383,53 @@ export interface components {
         AssetKind: "INPUT" | "REFERENCE" | "STYLE_EXAMPLE" | "OUTPUT" | "DEBUG" | "EXPORT";
         /** AssetResponse */
         AssetResponse: {
+            /** Analysis */
+            analysis?: {
+                [key: string]: unknown;
+            } | null;
+            /** Byte Size */
+            byte_size: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Height */
+            height: number;
             /**
              * Id
              * Format: uuid
              */
             id: string;
             kind: components["schemas"]["AssetKind"];
-            /** Mime Type */
-            mime_type: string;
-            /** Width */
-            width: number;
-            /** Height */
-            height: number;
-            /** Byte Size */
-            byte_size: number;
-            /** Sha256 */
-            sha256: string;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Mime Type */
+            mime_type: string;
             /** Preview Url */
             preview_url?: string | null;
-            /** Analysis */
-            analysis?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Sha256 */
+            sha256: string;
+            /** Width */
+            width: number;
         };
         /** BackgroundCorrection */
         BackgroundCorrection: {
+            /** Color */
+            color?: string | null;
+            mode: components["schemas"]["BackgroundMode"];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
             type: "background";
-            mode: components["schemas"]["BackgroundMode"];
-            /** Color */
-            color?: string | null;
         };
         /**
          * BackgroundMode
@@ -420,14 +438,17 @@ export interface components {
         BackgroundMode: "KEEP" | "BLUR" | "SOLID" | "REFERENCE";
         /** Body_upload_asset_api_v1_assets_upload_post */
         Body_upload_asset_api_v1_assets_upload_post: {
-            kind: components["schemas"]["AssetKind"];
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
+            kind: components["schemas"]["AssetKind"];
         };
         /** CorrectionRequest */
         CorrectionRequest: {
             /** Corrections */
-            corrections: components["schemas"]["BackgroundCorrection"][];
+            corrections: (components["schemas"]["MaskCorrection"] | components["schemas"]["AlignmentCorrection"] | components["schemas"]["GainCopyCorrection"] | components["schemas"]["EyeCorrection"] | components["schemas"]["BackgroundCorrection"])[];
         };
         /** CreateJobRequest */
         CreateJobRequest: {
@@ -438,26 +459,26 @@ export interface components {
             input_asset_id: string;
             /** Reference Asset Id */
             reference_asset_id?: string | null;
+            settings?: components["schemas"]["TransferSettingsRequest"];
             /** Style Id */
             style_id?: string | null;
-            settings?: components["schemas"]["TransferSettingsRequest"];
         };
         /** CreateStyleRequest */
         CreateStyleRequest: {
-            /** Name */
-            name: string;
             /**
              * Description
              * @default
              */
             description: string;
-            /** Rights Confirmed */
-            rights_confirmed: boolean;
             /**
              * Is Public
              * @default false
              */
             is_public: boolean;
+            /** Name */
+            name: string;
+            /** Rights Confirmed */
+            rights_confirmed: boolean;
         };
         /** DiagnosticArtifactResponse */
         DiagnosticArtifactResponse: {
@@ -466,22 +487,66 @@ export interface components {
              * Format: uuid
              */
             asset_id: string;
-            /** Kind */
-            kind: string;
             /** Download Url */
             download_url?: string | null;
+            /** Kind */
+            kind: string;
         };
         /** DownloadUrlResponse */
         DownloadUrlResponse: {
-            /** Url */
-            url: string;
-            /** Expires In Seconds */
-            expires_in_seconds: number;
             /**
              * Expires At
              * Format: date-time
              */
             expires_at: string;
+            /** Expires In Seconds */
+            expires_in_seconds: number;
+            /** Url */
+            url: string;
+        };
+        /** EyeCorrection */
+        EyeCorrection: {
+            /**
+             * Eye
+             * @enum {string}
+             */
+            eye: "LEFT" | "RIGHT";
+            /** Highlight Rotation Degrees */
+            highlight_rotation_degrees?: number | null;
+            /** Highlight Scale */
+            highlight_scale?: number | null;
+            /** Iris Radius */
+            iris_radius?: number | null;
+            /** Pupil Center */
+            pupil_center: [
+                number,
+                number
+            ];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "eye";
+        };
+        /** GainCopyCorrection */
+        GainCopyCorrection: {
+            /** Levels */
+            levels?: number[];
+            /** Source Polygon */
+            source_polygon: [
+                number,
+                number
+            ][];
+            /** Target Polygon */
+            target_polygon: [
+                number,
+                number
+            ][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "gain_copy";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -490,49 +555,30 @@ export interface components {
         };
         /** JobDiagnosticsResponse */
         JobDiagnosticsResponse: {
+            /** Artifacts */
+            artifacts: components["schemas"]["DiagnosticArtifactResponse"][];
+            /** Diagnostics */
+            diagnostics: {
+                [key: string]: unknown;
+            };
             /**
              * Job Id
              * Format: uuid
              */
             job_id: string;
-            /** Diagnostics */
-            diagnostics: {
-                [key: string]: unknown;
-            };
-            /** Artifacts */
-            artifacts: components["schemas"]["DiagnosticArtifactResponse"][];
         };
         /** JobResponse */
         JobResponse: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            status: components["schemas"]["JobStatus"];
-            stage: components["schemas"]["ProcessingStage"];
-            /** Progress */
-            progress: number;
-            /**
-             * Input Asset Id
-             * Format: uuid
-             */
-            input_asset_id: string;
-            /** Reference Asset Id */
-            reference_asset_id: string | null;
-            /** Style Id */
-            style_id: string | null;
-            /** Selected Style Example Id */
-            selected_style_example_id: string | null;
             algorithm_profile: components["schemas"]["AlgorithmProfile"];
-            /** Settings */
-            settings: {
-                [key: string]: unknown;
-            };
             /** Corrections */
             corrections: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Diagnostics Summary */
             diagnostics_summary: {
                 [key: string]: unknown;
@@ -543,30 +589,49 @@ export interface components {
             error_message: string | null;
             /** Error Message Safe */
             error_message_safe: string | null;
-            /** Output Asset Id */
-            output_asset_id?: string | null;
-            /** Output Url */
-            output_url?: string | null;
-            /** Input Preview Url */
-            input_preview_url?: string | null;
-            /** Reference Preview Url */
-            reference_preview_url?: string | null;
-            /** Warnings */
-            warnings?: components["schemas"]["JobWarning"][];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Started At */
-            started_at: string | null;
-            /** Finished At */
-            finished_at: string | null;
             /**
              * Expires At
              * Format: date-time
              */
             expires_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Input Asset Id
+             * Format: uuid
+             */
+            input_asset_id: string;
+            /** Input Preview Url */
+            input_preview_url?: string | null;
+            /** Output Asset Id */
+            output_asset_id?: string | null;
+            /** Output Url */
+            output_url?: string | null;
+            /** Progress */
+            progress: number;
+            /** Reference Asset Id */
+            reference_asset_id: string | null;
+            /** Reference Preview Url */
+            reference_preview_url?: string | null;
+            /** Selected Style Example Id */
+            selected_style_example_id: string | null;
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
+            stage: components["schemas"]["ProcessingStage"];
+            /** Started At */
+            started_at: string | null;
+            status: components["schemas"]["JobStatus"];
+            /** Style Id */
+            style_id: string | null;
+            /** Warnings */
+            warnings?: components["schemas"]["JobWarning"][];
         };
         /**
          * JobStatus
@@ -586,6 +651,26 @@ export interface components {
              */
             severity: "info" | "warning" | "error";
         };
+        /** MaskCorrection */
+        MaskCorrection: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "ADD" | "REMOVE";
+            /** Points */
+            points: [
+                number,
+                number
+            ][];
+            /** Radius */
+            radius: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "mask";
+        };
         /** MessageResponse */
         MessageResponse: {
             /** Message */
@@ -600,7 +685,7 @@ export interface components {
          * ProcessingStage
          * @enum {string}
          */
-        ProcessingStage: "VALIDATING" | "DECODING" | "FACE_LANDMARKS" | "SEGMENTATION" | "QUALITY_ANALYSIS" | "REFERENCE_SELECTION" | "AI_GENERATION" | "BACKGROUND" | "POSTPROCESSING" | "UPLOADING_OUTPUT" | "COMPLETED";
+        ProcessingStage: "VALIDATING" | "DECODING" | "FACE_LANDMARKS" | "SEGMENTATION" | "QUALITY_ANALYSIS" | "REFERENCE_SELECTION" | "AFFINE_ALIGNMENT" | "PIECEWISE_ALIGNMENT" | "DENSE_ALIGNMENT" | "MULTISCALE_TRANSFER" | "EYE_HIGHLIGHTS" | "BACKGROUND" | "POSTPROCESSING" | "UPLOADING_OUTPUT" | "COMPLETED";
         /** RankStyleRequest */
         RankStyleRequest: {
             /**
@@ -617,87 +702,87 @@ export interface components {
         /** RankStyleResponse */
         RankStyleResponse: {
             /**
-             * Style Id
-             * Format: uuid
-             */
-            style_id: string;
-            /**
              * Input Asset Id
              * Format: uuid
              */
             input_asset_id: string;
             /** Results */
             results: components["schemas"]["RankedStyleExample"][];
+            /**
+             * Style Id
+             * Format: uuid
+             */
+            style_id: string;
         };
         /** RankedStyleExample */
         RankedStyleExample: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Diagnostics */
+            diagnostics: {
+                [key: string]: unknown;
+            };
             /**
              * Example Id
              * Format: uuid
              */
             example_id: string;
-            /**
-             * Asset Id
-             * Format: uuid
-             */
-            asset_id: string;
             /** Score */
             score: number;
-            /** Diagnostics */
-            diagnostics: {
-                [key: string]: unknown;
-            };
         };
         /** StyleExampleResponse */
         StyleExampleResponse: {
             /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
              * Asset Id
              * Format: uuid
              */
             asset_id: string;
-            /** Quality */
-            quality: {
-                [key: string]: unknown;
-            };
-            /** Indexed */
-            indexed: boolean;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-        };
-        /** StyleResponse */
-        StyleResponse: {
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Name */
-            name: string;
-            /** Description */
-            description: string;
-            /** Rights Confirmed */
-            rights_confirmed: boolean;
-            /** Is Public */
-            is_public: boolean;
-            /** Examples */
-            examples: components["schemas"]["StyleExampleResponse"][];
-            /** Example Count */
-            example_count: number;
-            /** Preview Url */
-            preview_url?: string | null;
+            /** Indexed */
+            indexed: boolean;
+            /** Quality */
+            quality: {
+                [key: string]: unknown;
+            };
+        };
+        /** StyleResponse */
+        StyleResponse: {
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Description */
+            description: string;
+            /** Example Count */
+            example_count: number;
+            /** Examples */
+            examples: components["schemas"]["StyleExampleResponse"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Public */
+            is_public: boolean;
+            /** Name */
+            name: string;
+            /** Preview Url */
+            preview_url?: string | null;
+            /** Rights Confirmed */
+            rights_confirmed: boolean;
             /**
              * Updated At
              * Format: date-time
@@ -706,54 +791,70 @@ export interface components {
         };
         /** TransferSettingsRequest */
         TransferSettingsRequest: {
-            /**
-             * Algorithm Profile
-             * @default ai_instantstyle_v1
-             * @constant
-             */
-            algorithm_profile: "ai_instantstyle_v1";
-            /**
-             * Style Strength
-             * @default 0.75
-             */
-            style_strength: number;
-            /**
-             * Structure Strength
-             * @default 0.9
-             */
-            structure_strength: number;
-            /**
-             * Inference Steps
-             * @default 30
-             */
-            inference_steps: number;
-            /**
-             * Random Seed
-             * @default 0
-             */
-            random_seed: number;
-            /** @default KEEP */
-            background_mode: components["schemas"]["BackgroundMode"];
+            /** @default source_2014_compat */
+            algorithm_profile: components["schemas"]["AlgorithmProfile"];
             /** Background Color */
             background_color?: string | null;
-            /** @default PNG */
-            output_format: components["schemas"]["OutputFormat"];
+            /** @default KEEP */
+            background_mode: components["schemas"]["BackgroundMode"];
+            /**
+             * Debug Artifacts
+             * @default false
+             */
+            debug_artifacts: boolean;
+            /**
+             * Dense Alignment
+             * @default true
+             */
+            dense_alignment: boolean;
+            /**
+             * Eye Highlights
+             * @default true
+             */
+            eye_highlights: boolean;
+            /**
+             * Global Range Mix
+             * @default 0.25
+             */
+            global_range_mix: number;
             /**
              * Jpeg Quality
              * @default 95
              */
             jpeg_quality: number;
+            /** @default PNG */
+            output_format: components["schemas"]["OutputFormat"];
+            /**
+             * Processing Long Edge
+             * @default 1280
+             */
+            processing_long_edge: number;
+            /**
+             * Random Seed
+             * @default 0
+             */
+            random_seed: number;
+            /**
+             * Residual Strength
+             * @default 1
+             */
+            residual_strength: number;
+            /**
+             * Transfer Strength
+             * @default 1
+             */
+            transfer_strength: number;
         };
         /** UpdateStyleRequest */
         UpdateStyleRequest: {
-            /** Name */
-            name?: string | null;
             /** Description */
             description?: string | null;
-            /** Rights Confirmed */
-            rights_confirmed?: boolean | null;
             /** Is Public */
             is_public?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Rights Confirmed */
+            rights_confirmed?: boolean | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -763,10 +864,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -777,48 +874,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    live_api_v1_health_live_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
-    ready_api_v1_health_ready_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     upload_asset_api_v1_assets_upload_post: {
         parameters: {
             query?: never;
@@ -976,6 +1031,48 @@ export interface operations {
             };
         };
     };
+    live_api_v1_health_live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    ready_api_v1_health_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     create_job_api_v1_jobs_post: {
         parameters: {
             query?: never;
@@ -1069,37 +1166,6 @@ export interface operations {
             };
         };
     };
-    job_events_api_v1_jobs__job_id__events_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     cancel_job_api_v1_jobs__job_id__cancel_post: {
         parameters: {
             query?: never;
@@ -1131,7 +1197,7 @@ export interface operations {
             };
         };
     };
-    job_download_url_api_v1_jobs__job_id__download_url_post: {
+    save_corrections_api_v1_jobs__job_id__corrections_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1140,7 +1206,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1148,7 +1218,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                    "application/json": components["schemas"]["JobResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1193,7 +1263,7 @@ export interface operations {
             };
         };
     };
-    save_corrections_api_v1_jobs__job_id__corrections_post: {
+    job_download_url_api_v1_jobs__job_id__download_url_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1202,11 +1272,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CorrectionRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -1214,7 +1280,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JobResponse"];
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_events_api_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1468,37 +1565,6 @@ export interface operations {
             };
         };
     };
-    reindex_style_api_v1_styles__style_id__reindex_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                style_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MessageResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     rank_style_api_v1_styles__style_id__rank_post: {
         parameters: {
             query?: never;
@@ -1521,6 +1587,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RankStyleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reindex_style_api_v1_styles__style_id__reindex_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                style_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */

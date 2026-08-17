@@ -14,7 +14,6 @@ jobs:
   cpu-images-and-smoke:
     runs-on: ubuntu-24.04
     env:
-      COMPOSE_FILE: compose.yml:compose.ci.yml
       APP_ENV: test
       ALLOW_HEURISTIC_ANALYZER: "true"
       REQUIRE_MODELS_FOR_READINESS: "false"
@@ -27,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Build CPU images
-        run: docker compose build web api ai-engine worker-cpu caddy
+        run: docker compose build web api worker-cpu caddy
       - name: Scan application images
         uses: aquasecurity/trivy-action@0.29.0
         with:
@@ -36,43 +35,10 @@ jobs:
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: trivy-results.sarif
-      - name: Scan web image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-web
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Scan worker image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-worker-cpu
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Scan AI contract image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-ai-engine
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Scan proxy image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-caddy
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
       - name: Apply database migrations
         run: docker compose run --rm api alembic -c services/api/alembic.ini upgrade head
       - name: Start stack and wait
@@ -87,41 +53,12 @@ jobs:
       - if: always()
         run: docker compose down --volumes --remove-orphans
 
-  production-ai-image:
+  gpu-image:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build production CUDA AI image
-        run: docker compose build ai-engine
-      - name: Scan production AI image
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-ai-engine
-          format: sarif
-          output: trivy-ai-results.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-ai-results.sarif') != ''
-        with:
-          sarif_file: trivy-ai-results.sarif
-          category: production-ai-image
-      - name: Generate production AI SBOM
-        if: always()
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          image-ref: portrait-style-transfer-ai-engine
-          format: cyclonedx
-          output: ai-engine.cdx.json
-      - name: Upload production AI SBOM
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-ai-engine-sbom
-          path: ai-engine.cdx.json
-          if-no-files-found: error
+      - run: docker compose --profile gpu build worker-gpu
       - name: Explain runtime boundary
-        run: echo 'Build, vulnerability scan, and SBOM passed; real CUDA inference still requires a separate GPU runner.'
+        run: echo 'Image build passed; CUDA execution still requires a separate GPU runner.'

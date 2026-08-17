@@ -48,6 +48,8 @@ class ImageNormalizer:
         if claimed_content_type and claimed_content_type.lower() not in self._claimed_types:
             raise AppError("UNSUPPORTED_MEDIA_TYPE", "Only JPEG, PNG, and WebP are accepted.", 415)
 
+        previous_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = self.settings.max_decoded_pixels
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -76,24 +78,30 @@ class ImageNormalizer:
                     image = ImageOps.exif_transpose(image)
                     image = self._flatten_alpha(image)
                     width, height = image.size
-                    self._validate_dimensions(width, height)
-                    normalized = self._encode(image, source_format)
-                    if len(normalized) > self.settings.max_upload_bytes:
+                    if width * height > self.settings.max_decoded_pixels:
                         raise AppError(
-                            "NORMALIZED_UPLOAD_TOO_LARGE",
-                            "The normalized image exceeds the encoded-size limit.",
+                            "IMAGE_TOO_LARGE",
+                            "The decoded image exceeds the pixel limit.",
                             413,
-                            {
-                                "max_bytes": self.settings.max_upload_bytes,
-                                "normalized_bytes": len(normalized),
-                            },
+                            {"max_pixels": self.settings.max_decoded_pixels},
                         )
+                    if max(width, height) > self.settings.max_original_long_edge:
+                        raise AppError(
+                            "IMAGE_DIMENSION_TOO_LARGE",
+                            "The image dimensions exceed the supported limit.",
+                            413,
+                            {"max_long_edge": self.settings.max_original_long_edge},
+                        )
+                    normalized = self._encode(image, source_format)
         except AppError:
             raise
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise AppError("DECOMPRESSION_BOMB", "The image dimensions are unsafe.", 413) from exc
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             raise AppError("INVALID_IMAGE", "The uploaded file is not a valid image.", 422) from exc
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous_limit
+
         return NormalizedImage(
             data=normalized,
             mime_type=expected_mime,
@@ -104,26 +112,10 @@ class ImageNormalizer:
             source_format=source_format,
         )
 
-    def _verify(self, data: bytes) -> None:
+    @staticmethod
+    def _verify(data: bytes) -> None:
         with Image.open(io.BytesIO(data)) as probe:
-            self._validate_dimensions(*probe.size)
             probe.verify()
-
-    def _validate_dimensions(self, width: int, height: int) -> None:
-        if width * height > self.settings.max_decoded_pixels:
-            raise AppError(
-                "IMAGE_TOO_LARGE",
-                "The decoded image exceeds the pixel limit.",
-                413,
-                {"max_pixels": self.settings.max_decoded_pixels},
-            )
-        if max(width, height) > self.settings.max_original_long_edge:
-            raise AppError(
-                "IMAGE_DIMENSION_TOO_LARGE",
-                "The image dimensions exceed the supported limit.",
-                413,
-                {"max_long_edge": self.settings.max_original_long_edge},
-            )
 
     @staticmethod
     def _to_srgb(source: Image.Image) -> Image.Image:

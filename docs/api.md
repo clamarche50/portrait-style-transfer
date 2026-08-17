@@ -20,7 +20,7 @@ Safe details may contain actionable numeric thresholds. Responses never contain 
 - `DELETE /assets/{asset_id}`: idempotent owner deletion/cascade policy.
 - `POST /assets/{asset_id}/download-url`: short-lived signed URL.
 
-Client filename is not retained. Upload limits default to 15 MB encoded, 8 MP decoded, and 8000 pixels on the original long edge. The 8 MP cap keeps source/output face-analysis masks within the worker's bounded memory budget.
+Client filename is not retained. Upload limits default to 15 MB encoded, 25 MP decoded, and 8000 pixels on the original long edge.
 
 ## Jobs
 
@@ -31,7 +31,7 @@ Client filename is not retained. Upload limits default to 15 MB encoded, 8 MP de
 - `DELETE /jobs/{job_id}`: cancels if needed, deletes owned objects, and soft-deletes metadata.
 - `POST /jobs/{job_id}/download-url`: signed output URL for a successful, unexpired job.
 - `GET /jobs/{job_id}/diagnostics`: signed/serialized private diagnostics.
-- `POST /jobs/{job_id}/corrections`: AI jobs accept background corrections only. Classical mask/alignment/gain/eye corrections are rejected instead of being silently ignored. A rerun always executes the full AI pipeline.
+- `POST /jobs/{job_id}/corrections`: validate and store mask, alignment, gain, eye, or background correction primitives.
 - `POST /jobs/{job_id}/rerun`: enqueue from the earliest invalidated cached stage.
 
 Representative settings:
@@ -42,28 +42,29 @@ Representative settings:
   "reference_asset_id": "uuid",
   "style_id": null,
   "settings": {
-    "algorithm_profile": "ai_instantstyle_v1",
-    "style_strength": 0.75,
-    "structure_strength": 0.9,
-    "inference_steps": 30,
-    "random_seed": 0,
+    "algorithm_profile": "source_2014_compat",
+    "transfer_strength": 1.0,
+    "residual_strength": 1.0,
+    "global_range_mix": 0.25,
+    "eye_highlights": true,
     "background_mode": "KEEP",
     "background_color": null,
+    "dense_alignment": true,
+    "processing_long_edge": 1280,
     "output_format": "PNG",
-    "jpeg_quality": 95
+    "jpeg_quality": 95,
+    "debug_artifacts": false
   }
 }
 ```
 
-`ai_instantstyle_v1` is the only public profile. The server rejects the retired
-classical fields and any other profile value; there is no fallback from AI
-inference to another engine.
+`source_2014_compat` is the default profile and reproduces the archived 2014 MATLAB release (Fišer et al.) bit-for-bit where deterministic; `paper_exact` follows the paper text instead and remains selectable.
 
 ## Styles
 
 - `GET /styles`, `POST /styles`, `GET/PATCH/DELETE /styles/{style_id}`.
 - `POST /styles/{style_id}/examples`, `DELETE /styles/{style_id}/examples/{example_id}`.
-- `POST /styles/{style_id}/reindex`: rebuild the private face-analysis and ranking feature set used to select a style example.
+- `POST /styles/{style_id}/reindex`: rebuild versioned features and generated eye/background assets.
 - `POST /styles/{style_id}/rank`: accepts an input asset and returns top-three IDs plus score components and compatibility warnings.
 
 Creation requires `rights_confirmed=true`. Collections default private. Publication is a privileged, audited change.

@@ -37,7 +37,6 @@ from portrait_api.schemas.jobs import (
     JobDiagnosticsResponse,
     JobResponse,
 )
-from portrait_api.security import DownloadTokenSigner
 from portrait_api.services.corrections import build_invalidation_plan
 from portrait_api.services.queue import TaskQueue
 from portrait_api.services.redis_gateway import ProgressStore
@@ -101,9 +100,12 @@ def _event(job: Job, message: str) -> dict[str, object]:
 
 
 def _enqueue(job: Job, queue: TaskQueue, config: Settings) -> str:
-    # The CPU Celery worker orchestrates the isolated GPU inference sidecar.
-    del config
-    return queue.enqueue_transfer(str(job.id), use_gpu=False)
+    use_gpu = bool(
+        config.enable_gpu
+        and job.settings.get("dense_alignment", True)
+        and config.dense_alignment_device.lower().startswith("cuda")
+    )
+    return queue.enqueue_transfer(str(job.id), use_gpu=use_gpu)
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -405,7 +407,6 @@ async def delete_job(
 @router.post("/{job_id}/download-url", response_model=DownloadUrlResponse)
 def job_download_url(
     job_id: uuid.UUID,
-    response: Response,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_principal),
     config: Settings = Depends(get_settings_from_app),
@@ -416,7 +417,6 @@ def job_download_url(
     output = JobRepository(db).output_asset(job.id)
     if output is None:
         raise AppError("OUTPUT_NOT_FOUND", "The job output was not found.", 404)
-    DownloadTokenSigner(config).set_cookie(response, output.id, principal.session_id)
     return DownloadUrlResponse(
         url=asset_content_url(config, output.id, download=True),
         expires_in_seconds=config.signed_url_ttl_seconds,
@@ -482,21 +482,25 @@ def save_corrections(
     )
     diagnostics = dict(job.diagnostics or {})
     manifest = diagnostics.get("private_cache_manifest", {})
-    # The AI engine reruns end to end, so no cached stage output survives.
+    invalidated_stage_names = {stage.value for stage in plan.invalidated_stages}
+    retained_manifest: dict[str, object] = {}
     if isinstance(manifest, dict):
-        for metadata in manifest.values():
+        for name, metadata in manifest.items():
             if not isinstance(metadata, dict):
                 continue
-            key = metadata.get("key")
-            if isinstance(key, str):
-                storage.delete(key)
-    storage.delete_prefix(f"jobs/{job.id}/cache/")
-    diagnostics["private_cache_manifest"] = {}
+            if metadata.get("stage") in invalidated_stage_names:
+                key = metadata.get("key")
+                if isinstance(key, str):
+                    storage.delete(key)
+            else:
+                retained_manifest[str(name)] = metadata
+    for invalidated_stage in plan.invalidated_stages:
+        storage.delete_prefix(f"jobs/{job.id}/cache/{invalidated_stage.value.lower()}/")
+    diagnostics["private_cache_manifest"] = retained_manifest
     diagnostics["cache_invalidation"] = {
-        "resume_from_stage": ProcessingStage.VALIDATING.value,
+        "resume_from_stage": plan.earliest_stage.value,
         "invalidated_stages": [stage.value for stage in plan.invalidated_stages],
         "correction_hash": plan.correction_hash,
-        "full_ai_rerun": True,
     }
     job.corrections = combined
     job.diagnostics = diagnostics
@@ -523,9 +527,12 @@ async def rerun_job(
         raise AppError("JOB_QUOTA_EXCEEDED", "The concurrent job quota has been reached.", 429)
     _delete_job_artifacts(request, db, job, storage)
     diagnostics = dict(job.diagnostics or {})
+    invalidation = diagnostics.get("cache_invalidation", {})
+    resume_stage = invalidation.get("resume_from_stage", ProcessingStage.VALIDATING.value)
+    cache_manifest = diagnostics.get("private_cache_manifest", {})
     diagnostics["resume"] = {
-        "requested_stage": ProcessingStage.VALIDATING.value,
-        "cache_reuse": False,
+        "requested_stage": resume_stage,
+        "cache_reuse": isinstance(cache_manifest, dict) and bool(cache_manifest),
     }
     repository.reset_for_rerun(job, diagnostics=diagnostics)
     job.expires_at = datetime.now(UTC) + timedelta(hours=config.asset_ttl_hours)

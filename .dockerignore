@@ -34,7 +34,6 @@ __pycache__
 .wrangler
 outputs
 work
-build
 tmp
 .tmp
 *.cookies
@@ -53,9 +52,6 @@ models/*.onnx
 models/*.bin
 models/*.pt
 models/*.pth
-# The AI image reads weights from a read-only runtime bind mount; never send
-# multi-gigabyte local checkpoints to BuildKit.
-models/instantstyle
 *.mex*
 postgres-data
 redis-data

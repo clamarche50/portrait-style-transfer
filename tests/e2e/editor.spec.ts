@@ -21,11 +21,11 @@ test("uploads a pair, observes progress, downloads, and deletes", async ({ page 
     uploads += 1;
     await route.fulfill({ json: asset(uploads === 1 ? "input-id" : "reference-id", uploads === 1 ? "INPUT" : "REFERENCE") });
   });
-  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { id: "job-id", status: "SUCCEEDED", stage: "COMPLETED", progress: 100, input_asset_id: "input-id", reference_asset_id: "reference-id", algorithm_profile: "ai_instantstyle_v1", settings: { algorithm_profile: "ai_instantstyle_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 }, output_url: "data:image/png;base64," + pixelPng.toString("base64"), created_at: new Date().toISOString() } }));
+  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: { id: "job-id", status: "SUCCEEDED", stage: "COMPLETED", progress: 100, input_asset_id: "input-id", reference_asset_id: "reference-id", settings: { algorithm_profile: "source_2014_compat", transfer_strength: 1, residual_strength: 1, global_range_mix: .25, eye_highlights: true, background_mode: "KEEP", background_color: null, dense_alignment: true, processing_long_edge: 1280, output_format: "PNG", jpeg_quality: 95, debug_artifacts: false }, output_url: "data:image/png;base64," + pixelPng.toString("base64"), created_at: new Date().toISOString() } }));
   await page.route("**/api/v1/jobs/job-id/diagnostics", (route) => route.fulfill({ json: {
     job_id: "job-id",
-    diagnostics: { profile: "ai_instantstyle_v1", engine: { name: "InstantStyle", structure_strength: .9 } },
-    artifacts: [{ asset_id: "artifact-id", kind: "OTHER", download_url: "/api/v1/jobs/job-id/artifact.png" }],
+    diagnostics: { profile: "source_2014_compat", alignment: { selected_stage: "dense" } },
+    artifacts: [{ asset_id: "artifact-id", kind: "GAIN", download_url: "/api/v1/jobs/job-id/artifact.png" }],
   } }));
   await page.route("**/api/v1/jobs/job-id/download-url", (route) => route.fulfill({ json: { url: "/api/v1/jobs/job-id/output.png", expires_at: new Date().toISOString(), expires_in_seconds: 300 } }));
   await page.route("**/api/v1/jobs/job-id/output.png", (route) => route.fulfill({
@@ -42,9 +42,9 @@ test("uploads a pair, observes progress, downloads, and deletes", async ({ page 
   await inputs.nth(1).setInputFiles({ name: "reference.png", mimeType: "image/png", buffer: pixelPng });
   await page.getByRole("button", { name: "Create portrait" }).click();
   await expect(page.getByText("Your finish is ready")).toBeVisible();
-  await expect(page.getByText("Style transferred. Review the likeness.")).toBeVisible();
+  await expect(page.getByText("The style moved. You stayed.")).toBeVisible();
   await page.getByText("Processing diagnostics").click();
-  await expect(page.getByText('"name": "InstantStyle"')).toBeVisible();
+  await expect(page.getByText('"selected_stage": "dense"')).toBeVisible();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download PNG" }).click();
   expect((await download).suggestedFilename()).toBe("portrait-result.png");
@@ -52,7 +52,7 @@ test("uploads a pair, observes progress, downloads, and deletes", async ({ page 
   await page.getByRole("button", { name: /Delete/ }).last().click();
 });
 
-test("does not expose classical correction controls for an AI job", async ({ page }) => {
+test("saves a normalized alignment correction and reruns the affected stages", async ({ page }) => {
   const now = new Date().toISOString();
   const succeeded = {
     id: "job-correction",
@@ -61,17 +61,24 @@ test("does not expose classical correction controls for an AI job", async ({ pag
     progress: 100,
     input_asset_id: "input-id",
     reference_asset_id: "reference-id",
-    algorithm_profile: "ai_instantstyle_v1",
-    settings: { algorithm_profile: "ai_instantstyle_v1", style_strength: .75, structure_strength: .9, inference_steps: 30, random_seed: 0, background_mode: "KEEP", background_color: null, output_format: "PNG", jpeg_quality: 95 },
+    settings: { algorithm_profile: "source_2014_compat", transfer_strength: 1, residual_strength: 1, global_range_mix: .25, eye_highlights: true, background_mode: "KEEP", background_color: null, dense_alignment: true, processing_long_edge: 1280, output_format: "PNG", jpeg_quality: 95, debug_artifacts: false },
     input_preview_url: "data:image/png;base64," + pixelPng.toString("base64"),
     output_url: "data:image/png;base64," + pixelPng.toString("base64"),
     created_at: now,
     expires_at: new Date(Date.now() + 86_400_000).toISOString(),
   };
+  let correctionBody: unknown;
   await page.route("**/api/v1/jobs/job-correction/diagnostics", (route) => route.fulfill({ json: { job_id: "job-correction", diagnostics: {}, artifacts: [] } }));
+  await page.route("**/api/v1/jobs/job-correction/corrections", async (route) => {
+    correctionBody = route.request().postDataJSON();
+    await route.fulfill({ json: succeeded });
+  });
+  await page.route("**/api/v1/jobs/job-correction/rerun", (route) => route.fulfill({ json: { ...succeeded, status: "QUEUED", stage: "AFFINE_ALIGNMENT", progress: 24 } }));
   await page.route("**/api/v1/jobs/job-correction", (route) => route.fulfill({ json: succeeded }));
 
   await page.goto("/jobs/job-correction");
-  await expect(page.getByRole("tab", { name: "Alignment" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Save & rerun" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Alignment" }).click();
+  await page.getByRole("button", { name: "Save & rerun" }).click();
+  await expect(page.getByText("24%")).toBeVisible();
+  expect(correctionBody).toEqual({ corrections: [{ type: "alignment", input_points: [[0.5, 0.5]], reference_points: [[0.5, 0.5]] }] });
 });

@@ -143,7 +143,7 @@ class Job(Base):
     )
     algorithm_profile: Mapped[AlgorithmProfile] = mapped_column(
         enum_type(AlgorithmProfile, "algorithm_profile"),
-        default=AlgorithmProfile.AI_INSTANTSTYLE_V1,
+        default=AlgorithmProfile.SOURCE_2014_COMPAT,
     )
     settings: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     corrections: Mapped[list[dict[str, Any]] | None] = mapped_column(JsonType)

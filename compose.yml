@@ -2,9 +2,6 @@ name: portrait-style-transfer
 
 x-app-environment: &app-environment
   APP_ENV: ${APP_ENV:-development}
-  EXPOSE_API_DOCS: ${EXPOSE_API_DOCS:-false}
-  EXPOSE_METRICS: ${EXPOSE_METRICS:-false}
-  RATE_LIMIT_FAIL_CLOSED: ${RATE_LIMIT_FAIL_CLOSED:-true}
   APP_BASE_URL: ${APP_BASE_URL:-https://localhost}
   API_BASE_URL: ${API_BASE_URL:-http://api:8000}
   PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api/v1}
@@ -23,52 +20,32 @@ x-app-environment: &app-environment
   SIGNED_URL_TTL_SECONDS: ${SIGNED_URL_TTL_SECONDS:-300}
   ASSET_TTL_HOURS: ${ASSET_TTL_HOURS:-24}
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
-  MAX_DECODED_PIXELS: ${MAX_DECODED_PIXELS:-8000000}
+  MAX_DECODED_PIXELS: ${MAX_DECODED_PIXELS:-25000000}
   MAX_ORIGINAL_LONG_EDGE: ${MAX_ORIGINAL_LONG_EDGE:-8000}
   MAX_SESSION_UPLOAD_BYTES_24H: ${MAX_SESSION_UPLOAD_BYTES_24H:-104857600}
   MAX_ASSETS_PER_SESSION: ${MAX_ASSETS_PER_SESSION:-100}
   MAX_CONCURRENT_JOBS_PER_USER: ${MAX_CONCURRENT_JOBS_PER_USER:-2}
-  # Must exceed the AI HTTP timeout plus object I/O and durable finalization.
-  WORKER_TASK_TIME_LIMIT_SECONDS: ${WORKER_TASK_TIME_LIMIT_SECONDS:-900}
+  WORKER_TASK_TIME_LIMIT_SECONDS: ${WORKER_TASK_TIME_LIMIT_SECONDS:-120}
   MAX_JOB_CACHE_BYTES: ${MAX_JOB_CACHE_BYTES:-536870912}
+  MAX_DEBUG_ARTIFACTS: ${MAX_DEBUG_ARTIFACTS:-80}
   RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
   RATE_LIMIT_UPLOADS_PER_HOUR: ${RATE_LIMIT_UPLOADS_PER_HOUR:-20}
   RATE_LIMIT_JOBS_PER_HOUR: ${RATE_LIMIT_JOBS_PER_HOUR:-30}
   REDIS_PROGRESS_TTL_SECONDS: ${REDIS_PROGRESS_TTL_SECONDS:-172800}
   JOB_LOCK_TTL_SECONDS: ${JOB_LOCK_TTL_SECONDS:-3600}
-  MODEL_DIR: /app/models
-  FACE_LANDMARKER_MODEL: face_landmarker.task
-  IMAGE_SEGMENTER_MODEL: selfie_multiclass_256x256.tflite
+  MODEL_DIR: ${MODEL_DIR:-/app/models}
+  FACE_LANDMARKER_MODEL: ${FACE_LANDMARKER_MODEL:-face_landmarker.task}
+  IMAGE_SEGMENTER_MODEL: ${IMAGE_SEGMENTER_MODEL:-selfie_multiclass_256x256.tflite}
   REQUIRE_MODELS_FOR_READINESS: ${REQUIRE_MODELS_FOR_READINESS:-true}
-  DEFAULT_ALGORITHM_PROFILE: ai_instantstyle_v1
+  DEFAULT_ALGORITHM_PROFILE: ${DEFAULT_ALGORITHM_PROFILE:-source_2014_compat}
+  ENABLE_SOURCE_COMPAT_PROFILE: ${ENABLE_SOURCE_COMPAT_PROFILE:-true}
+  DENSE_ALIGNMENT_DEVICE: ${DENSE_ALIGNMENT_DEVICE:-cpu}
   ALLOW_HEURISTIC_ANALYZER: ${ALLOW_HEURISTIC_ANALYZER:-false}
   CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost,http://localhost:3000}
   SESSION_SECRET: ${SESSION_SECRET:-development-session-secret-change-me}
-  COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-  COOKIE_SECURE_OVERRIDE: ${COOKIE_SECURE_OVERRIDE:-true}
   SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-604800}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-
-x-analysis-model-volumes: &analysis-model-volumes
-  - type: bind
-    source: ./models/manifest.json
-    target: /app/models/manifest.json
-    read_only: true
-    bind:
-      create_host_path: false
-  - type: bind
-    source: ./models/face_landmarker.task
-    target: /app/models/face_landmarker.task
-    read_only: true
-    bind:
-      create_host_path: false
-  - type: bind
-    source: ./models/selfie_multiclass_256x256.tflite
-    target: /app/models/selfie_multiclass_256x256.tflite
-    read_only: true
-    bind:
-      create_host_path: false
 
 services:
   postgres:
@@ -149,7 +126,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-    volumes: *analysis-model-volumes
+    volumes:
+      - ./models:/app/models:ro
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
     read_only: true
@@ -164,66 +142,14 @@ services:
     restart: unless-stopped
     networks: [frontend, backend]
 
-  ai-engine:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.ai-engine
-    environment:
-      ENGINE_MODEL_ROOT: /models/instantstyle
-      ENGINE_MANIFEST_PATH: /models/instantstyle/manifest.json
-      ENGINE_DEVICE: cuda
-      ENGINE_DTYPE: float16
-      ENGINE_MAX_LONG_SIDE: ${ENGINE_MAX_LONG_SIDE:-1280}
-      ENGINE_VERIFY_MODELS: "true"
-      ENGINE_EAGER_LOAD: ${ENGINE_EAGER_LOAD:-true}
-      # Identity/style tuning knobs (ablation and calibration surface).
-      ENGINE_CONTROLNET_SCALE: ${ENGINE_CONTROLNET_SCALE:-0.35}
-      ENGINE_FACEID_SCALE_LIMIT: ${ENGINE_FACEID_SCALE_LIMIT:-1.0}
-      ENGINE_IMG2IMG_BASE_STRENGTH: ${ENGINE_IMG2IMG_BASE_STRENGTH:-0.65}
-      ENGINE_IMG2IMG_STRUCTURE_WEIGHT: ${ENGINE_IMG2IMG_STRUCTURE_WEIGHT:-0.2}
-      ENGINE_PALETTE_BLEND: ${ENGINE_PALETTE_BLEND:-0.8}
-      ENGINE_GUIDANCE_SCALE: ${ENGINE_GUIDANCE_SCALE:-5.0}
-      ENGINE_IDENTITY_REPAIR_BELOW: ${ENGINE_IDENTITY_REPAIR_BELOW:-0.45}
-      ENGINE_IDENTITY_FAIL_BELOW: ${ENGINE_IDENTITY_FAIL_BELOW:-0.30}
-      AI_ENGINE_API_TOKEN: ${AI_ENGINE_API_TOKEN:-}
-      # The API rejects normalized images that exceed the same 15 MiB bound,
-      # so the private sidecar never needs a wider request allowance.
-      MAX_UPLOAD_BYTES: ${AI_ENGINE_MAX_UPLOAD_BYTES:-15728640}
-      MAX_DECODED_PIXELS: ${MAX_DECODED_PIXELS:-8000000}
-      HF_HUB_OFFLINE: "1"
-      TRANSFORMERS_OFFLINE: "1"
-      DIFFUSERS_OFFLINE: "1"
-    volumes:
-      - ./models/instantstyle:/models/instantstyle:ro
-    read_only: true
-    tmpfs:
-      - /tmp:size=2g,mode=1777
-    shm_size: 1g
-    mem_limit: ${AI_ENGINE_MEMORY_LIMIT:-10g}
-    gpus: all
-    init: true
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health/ready', timeout=8)"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 600s
-    stop_grace_period: 45s
-    restart: unless-stopped
-    networks: [backend]
-
   worker-cpu:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker-cpu
     environment:
       <<: *app-environment
-      AI_ENGINE_URL: ${AI_ENGINE_URL:-http://ai-engine:8010}
-      AI_ENGINE_REQUEST_TIMEOUT_SECONDS: ${AI_ENGINE_REQUEST_TIMEOUT_SECONDS:-600}
-      AI_ENGINE_API_TOKEN: ${AI_ENGINE_API_TOKEN:-}
+      ENABLE_GPU: "false"
+      DENSE_ALIGNMENT_DEVICE: cpu
     depends_on:
       postgres:
         condition: service_healthy
@@ -231,16 +157,42 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      ai-engine:
-        condition: service_healthy
-    volumes: *analysis-model-volumes
+    volumes:
+      - ./models:/app/models:ro
     read_only: true
     tmpfs:
       - /tmp:size=1g,mode=1777
-    mem_limit: ${WORKER_MEMORY_LIMIT:-5g}
+    mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
     stop_grace_period: 30s
     restart: unless-stopped
-    networks: [backend, egress]
+    networks: [backend]
+
+  worker-gpu:
+    profiles: [gpu]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker-gpu
+    environment:
+      <<: *app-environment
+      ENABLE_GPU: "true"
+      DENSE_ALIGNMENT_DEVICE: cuda
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./models:/app/models:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
+    gpus: all
+    stop_grace_period: 30s
+    restart: unless-stopped
+    networks: [backend]
 
   web:
     build:
@@ -295,9 +247,6 @@ networks:
   frontend:
   backend:
     internal: true
-  # Queue workers need outbound access for explicitly configured managed S3 or
-  # OTLP endpoints. No service publishes a host port on this network.
-  egress:
 
 volumes:
   postgres-data:

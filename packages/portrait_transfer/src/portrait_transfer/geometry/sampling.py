@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Final, cast
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import map_coordinates
+
+# Out-of-bounds fill used by the archived MATLAB warpImage.m.
+MATLAB_OOB_FILL: Final[float] = 0.6
 
 
 def identity_map(shape: tuple[int, int] | tuple[int, int, int]) -> NDArray[np.float32]:

@@ -20,10 +20,9 @@ export function PortraitComparison({ job, inputUrl, outputUrl, onDownload, onRet
   return (
     <section className="result-card" aria-labelledby="result-title">
       <div className="result-card__heading">
-        <div><span className="eyebrow">AI-generated edit</span><h2 id="result-title">Style transferred. Review the likeness.</h2></div>
-        <span className="result-status">InstantStyle AI · {job.settings.output_format}</span>
+        <div><span className="eyebrow">Result</span><h2 id="result-title">The style moved. You stayed.</h2></div>
+        <span className="result-status">Paper exact · {job.settings.output_format}</span>
       </div>
-      <p className="result-disclosure">Diffusion can alter facial details, age cues, accessories, or expression. Compare the result with the source before publishing or using it.</p>
       <div className="comparison-stage" style={{ "--portrait-zoom": zoom } as React.CSSProperties}>
         {/* Presigned private image URLs. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
