@@ -27,7 +27,7 @@ export function PortraitComparison({ job, inputUrl, outputUrl, onDownload, onRet
         {/* Presigned private image URLs. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={inputUrl} alt="Original portrait" />
-        <div className="comparison-stage__after" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
+        <div className="comparison-stage__after" style={{ clipPath: `inset(0 0 0 ${split}%)` }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={outputUrl} alt="Style-transferred portrait" />
         </div>
