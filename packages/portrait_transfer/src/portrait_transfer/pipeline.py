@@ -350,10 +350,16 @@ def transfer_portrait_style(
         started = perf_counter()
         runtime.progress(ProcessingStage.PREFLIGHT, 8, "Analyzing portraits")
         input_analysis = analyze_portrait(
-            input_image, runtime.analyzer, settings.preflight
+            input_image,
+            runtime.analyzer,
+            settings.preflight,
+            settings.processing_long_edge,
         )
         reference_analysis = analyze_portrait(
-            reference_image, runtime.analyzer, settings.preflight
+            reference_image,
+            runtime.analyzer,
+            settings.preflight,
+            settings.processing_long_edge,
         )
         compatibility = validate_pair(
             input_analysis, reference_analysis, input_image, reference_image

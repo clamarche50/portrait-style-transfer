@@ -87,9 +87,17 @@ def ingest_style(
             landmarks=None,
             mask_quality=0.5,
         )
-        background = extract_reference_background(image, analysis.masks.foreground_alpha)
+        background = extract_reference_background(
+            image, analysis.masks.foreground_alpha
+        )
         return IngestedStyle(
-            identifier, image, analysis, feature, background, (None, None), has_face=False
+            identifier,
+            image,
+            analysis,
+            feature,
+            background,
+            (None, None),
+            has_face=False,
         )
     feature = build_style_feature(
         identifier,

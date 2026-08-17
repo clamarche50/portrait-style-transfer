@@ -39,6 +39,8 @@ class ImageLimits:
 
 @dataclass(frozen=True)
 class PreflightThresholds:
+    # Required eye-center separation in pixels at processing_long_edge; the
+    # gate scales it by the canonical crop side so it is resolution invariant.
     min_inter_eye_distance: float = 150.0
     max_abs_yaw: float = 25.0
     max_abs_pitch: float = 20.0

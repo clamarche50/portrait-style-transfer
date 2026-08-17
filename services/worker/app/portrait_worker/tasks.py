@@ -534,6 +534,7 @@ def process_transfer_job(self: Task, job_id: str) -> None:
                     input_decoded.rgb,
                     portrait_analyzer,
                     settings.preflight,
+                    settings.processing_long_edge,
                 )
                 query_feature = build_style_feature(
                     "input",

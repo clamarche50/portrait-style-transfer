@@ -87,6 +87,11 @@ class CropContext:
         )
 
 
+def canonical_crop_side(face: BoundingBox) -> float:
+    """Square side of the canonical crop box for a face box."""
+    return max(face.width * 1.7, face.height * 1.75)
+
+
 def create_canonical_crop(
     image: ArrayLike,
     analysis: PortraitAnalysis,
@@ -101,8 +106,7 @@ def create_canonical_crop(
     x2 = face.x2 + 0.35 * face.width
     y1 = face.y - 0.45 * face.height
     y2 = face.y2 + 0.30 * face.height
-    crop_width, crop_height = x2 - x1, y2 - y1
-    side = max(crop_width, crop_height)
+    side = canonical_crop_side(face)
     center_x, center_y = (x1 + x2) / 2.0, (y1 + y2) / 2.0
     box = BoundingBox(center_x - side / 2.0, center_y - side / 2.0, side, side)
     if output_shape is None:

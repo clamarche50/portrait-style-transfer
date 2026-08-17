@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from .alignment.anchors import eye_centers
 from .config import PreflightThresholds
+from .crop import canonical_crop_side
 from .exceptions import FaceDetectionError, PairCompatibilityError, QualityFailure
 from .image_io import normalize_rgb
 from .landmarks import canonical_68_landmarks, validate_landmarks
@@ -54,6 +55,7 @@ def _validate_analysis(
     analysis: PortraitAnalysis,
     image: NDArray[np.float32],
     thresholds: PreflightThresholds,
+    processing_long_edge: int,
 ) -> None:
     image_shape = (image.shape[0], image.shape[1], image.shape[2])
     validate_landmarks(analysis.landmarks, image_shape)
@@ -72,11 +74,19 @@ def _validate_analysis(
         )
     if analysis.face_box.height / image.shape[0] < thresholds.min_head_height_fraction:
         raise FaceDetectionError("Head occupies too little of the image")
-    if analysis.quality.inter_eye_distance < thresholds.min_inter_eye_distance:
+    # The minimum is configured in pixels at processing resolution; scale it by
+    # the canonical crop side so small uploads are judged on face proportion,
+    # not absolute upload resolution.
+    crop_side = canonical_crop_side(analysis.face_box)
+    effective_minimum = (
+        thresholds.min_inter_eye_distance * crop_side / float(processing_long_edge)
+    )
+    if analysis.quality.inter_eye_distance < effective_minimum:
         raise QualityFailure(
             "Inter-eye distance is below the configured minimum",
             inter_eye_distance=analysis.quality.inter_eye_distance,
-            minimum=thresholds.min_inter_eye_distance,
+            minimum=effective_minimum,
+            processing_long_edge=processing_long_edge,
         )
     if analysis.quality.blur_variance < thresholds.severe_blur_variance:
         raise QualityFailure(
@@ -97,11 +107,14 @@ def analyze_portrait(
     rgb: NDArray[np.float32],
     analyzer: PortraitAnalyzer | None = None,
     thresholds: PreflightThresholds | None = None,
+    processing_long_edge: int = 1280,
 ) -> PortraitAnalysis:
     image = normalize_rgb(rgb)
     backend = analyzer or HeuristicPortraitAnalyzer()
     analysis = backend.analyze(image)
-    _validate_analysis(analysis, image, thresholds or PreflightThresholds())
+    _validate_analysis(
+        analysis, image, thresholds or PreflightThresholds(), processing_long_edge
+    )
     return analysis
 
 

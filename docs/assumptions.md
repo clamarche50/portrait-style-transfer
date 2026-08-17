@@ -2,7 +2,7 @@
 
 These assumptions make underspecified roadmap requirements executable without changing the research method.
 
-1. **Single near-frontal face.** Defaults reject absolute yaw above 25°, pitch above 20°, or roll above 20° and require roughly 150 pixels between eyes. Thresholds are configuration, not demographic judgments.
+1. **Single near-frontal face.** Defaults reject absolute yaw above 25°, pitch above 20°, or roll above 20° and require roughly 150 pixels between eyes at the processing resolution (the minimum scales with the canonical crop side, so small uploads are judged on face proportion rather than absolute pixel count). Thresholds are configuration, not demographic judgments.
 2. **Segmentation model.** MediaPipe selfie multiclass confidence is the initial matte; GrabCut and deterministic image processing refine it. Classes unavailable from a model version are derived from landmarks/confidence, not invented labels.
 3. **Reference scale.** Reference preprocessing establishes a canonical face scale before fixed-sigma energy features; maps still address original reference coordinates. This avoids applying nominal pixel neighborhoods at incomparable face scales.
 4. **Dense correspondence.** Kornia dense SIFT plus continuous robust flow is a clean-room approximation. It cannot reproduce the bundled discrete SIFT Flow runtime exactly.
